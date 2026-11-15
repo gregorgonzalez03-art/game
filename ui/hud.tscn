@@ -3,6 +3,7 @@
 [ext_resource type="Script" path="res://ui/hud.gd" id="1_hud"]
 
 [node name="HUD" type="CanvasLayer"]
+process_mode = 3
 script = ExtResource("1_hud")
 
 [node name="UI" type="Control" parent="."]
@@ -19,14 +20,21 @@ layout_mode = 1
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
-offset_left = -220.0
+offset_left = -380.0
 offset_top = 20.0
 offset_right = -20.0
-offset_bottom = 100.0
+offset_bottom = 200.0
 grow_horizontal = 0
 
 [node name="VBoxContainer" type="VBoxContainer" parent="UI/MarginContainer"]
 layout_mode = 2
+
+[node name="WaveLabel" type="Label" parent="UI/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.85, 0.2, 1)
+theme_override_font_sizes/font_size = 20
+text = "OLEADA ACTUAL: 1"
+horizontal_alignment = 2
 
 [node name="ScoreLabel" type="Label" parent="UI/MarginContainer/VBoxContainer"]
 layout_mode = 2
@@ -34,13 +42,54 @@ theme_override_font_sizes/font_size = 20
 text = "SCORE: 0"
 horizontal_alignment = 2
 
+[node name="XPLabel" type="Label" parent="UI/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.2, 0.85, 1, 1)
+theme_override_font_sizes/font_size = 18
+text = "XP: 0"
+horizontal_alignment = 2
+
 [node name="ComboLabel" type="Label" parent="UI/MarginContainer/VBoxContainer"]
 visible = false
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.85, 0.2, 1)
 theme_override_font_sizes/font_size = 24
-text = "COMBO x1.0 (0)"
+text = "COMBO: x1.0 (0)"
 horizontal_alignment = 2
+
+[node name="OverchargeBadge" type="Label" parent="UI/MarginContainer/VBoxContainer"]
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(0.2, 1, 0.5, 1)
+theme_override_colors/font_shadow_color = Color(0, 0.4, 0.15, 0.8)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 16
+text = "⚡ EDGE OVERCHARGE (+30% RECARGA)"
+horizontal_alignment = 2
+
+[node name="WaveBannerLabel" type="Label" parent="UI"]
+visible = false
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -350.0
+offset_top = 80.0
+offset_right = 350.0
+offset_bottom = 150.0
+grow_horizontal = 2
+pivot_offset = Vector2(350, 35)
+theme_override_colors/font_color = Color(1, 0.88, 0.2, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9)
+theme_override_colors/font_outline_color = Color(0.08, 0.08, 0.12, 1)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_constants/outline_size = 8
+theme_override_font_sizes/font_size = 38
+text = "¡OLEADA 1 COMPLETADA!"
+horizontal_alignment = 1
+vertical_alignment = 1
 
 [node name="Crosshair" type="CenterContainer" parent="UI"]
 layout_mode = 1
@@ -96,3 +145,49 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 color = Color(1, 1, 1, 0.6)
+
+[node name="GameOverPanel" type="ColorRect" parent="UI"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.04, 0.04, 0.07, 0.82)
+
+[node name="CenterContainer" type="CenterContainer" parent="UI/GameOverPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UI/GameOverPanel/CenterContainer"]
+layout_mode = 2
+theme_override_constants/separation = 18
+
+[node name="TitleLabel" type="Label" parent="UI/GameOverPanel/CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.2, 0.2, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.8)
+theme_override_constants/shadow_offset_x = 3
+theme_override_constants/shadow_offset_y = 3
+theme_override_font_sizes/font_size = 54
+text = "GAME OVER"
+horizontal_alignment = 1
+
+[node name="StatsLabel" type="Label" parent="UI/GameOverPanel/CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.88, 0.95, 1)
+theme_override_font_sizes/font_size = 20
+text = "PUNTUACIÓN FINAL: 0 | OLEADA ALCANZADA: 1"
+horizontal_alignment = 1
+
+[node name="RestartButton" type="Button" parent="UI/GameOverPanel/CenterContainer/VBoxContainer"]
+custom_minimum_size = Vector2(240, 52)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 20
+text = "REINICIAR (R)"

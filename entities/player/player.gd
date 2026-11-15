@@ -18,7 +18,7 @@ var is_sliding: bool = false
 var slide_timer: float = 0.0
 var slide_direction: Vector3 = Vector3.ZERO
 
-# Mecánicas de Dash (Impulso horizontal con cooldown)
+# Mecánicas de Dash (Espacio con cooldown)
 @export var dash_speed: float = 24.0
 @export var dash_duration: float = 0.2
 @export var dash_cooldown: float = 1.0
@@ -27,11 +27,25 @@ var dash_timer: float = 0.0
 var dash_cooldown_timer: float = 0.0
 var dash_direction: Vector3 = Vector3.ZERO
 
-# Disparo de Pulso Cinético
+# Ganchazo de Atracción (Pull - Clic Derecho)
+@export var pull_cooldown: float = 1.5
+var pull_cooldown_timer: float = 0.0
+
+# Disparo de Pulso Cinético (Clic Izquierdo)
 @export var pulse_cooldown: float = 0.35
-@export var pulse_force: float = 32.0
+@export var pulse_force: float = 35.0
 @export var pulse_range: float = 75.0
 var pulse_cooldown_timer: float = 0.0
+
+# Mecánica Anti-Kiting: Sobrecarga de Borde (Edge Overcharge)
+var is_edge_overcharged: bool = false
+
+# Retroceso e impacto cinético externo (empuje de Swarmers)
+var external_knockback: Vector3 = Vector3.ZERO
+
+# Sistema de Screen Shake
+var shake_trauma: float = 0.0
+const SHAKE_DECAY: float = 3.5
 
 # Cámara y Sensibilidad
 @export var mouse_sensitivity: float = 0.0025
@@ -55,12 +69,23 @@ func _ready() -> void:
 	if visual_mesh and visual_mesh.mesh:
 		visual_mesh.mesh = visual_mesh.mesh.duplicate()
 
+	floor_snap_length = 0.4
+	floor_constant_speed = true
+	floor_stop_on_slope = true
+	floor_max_angle = deg_to_rad(45.0)
+
+	kinetic_cast.collision_mask = 5 # Capas 1 (World) y 3 (Enemies), ignora capa 2 (Player)
+	kinetic_cast.collide_with_areas = false
+	kinetic_cast.collide_with_bodies = true
+	kinetic_cast.add_exception(self)
+
+func _process(delta: float) -> void:
+	_handle_screen_shake(delta)
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var motion: InputEventMouseMotion = event as InputEventMouseMotion
-		# Rotación horizontal del jugador (Yaw)
 		rotate_y(-motion.relative.x * mouse_sensitivity)
-		# Rotación vertical del pivote de cámara (Pitch)
 		var current_pitch: float = camera_pivot.rotation.x - motion.relative.y * mouse_sensitivity
 		camera_pivot.rotation.x = clampf(
 			current_pitch,
@@ -77,18 +102,78 @@ func _unhandled_input(event: InputEvent) -> void:
 				Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func _physics_process(delta: float) -> void:
+	_check_edge_overcharge()
 	_handle_timers(delta)
 	_apply_gravity(delta)
 	_handle_actions()
 	_handle_movement(delta)
+
+	# Sumar el retroceso externo acumulado a la velocidad horizontal y decaer rápidamente
+	velocity.x += external_knockback.x
+	velocity.z += external_knockback.z
+	external_knockback = external_knockback.lerp(Vector3.ZERO, 15.0 * delta)
+	if external_knockback.length_squared() < 0.001:
+		external_knockback = Vector3.ZERO
+
+	var was_grounded: bool = is_on_floor()
 	move_and_slide()
+	_prevent_rigidbody_lift(was_grounded)
+	_push_enemies()
+
+## Recibe empuje o retroceso cinético externo (ej. colisión de Swarmers)
+func apply_knockback(force_vector: Vector3) -> void:
+	# Asegurar que el empuje sea exclusivamente horizontal para empujar hacia el borde
+	var h_force: Vector3 = Vector3(force_vector.x, 0.0, force_vector.z)
+	external_knockback = h_force
+
+## Evita que los rebotes físicos y colisiones con RigidBodies levanten al jugador del suelo
+func _prevent_rigidbody_lift(was_grounded: bool) -> void:
+	var collided_with_rigidbody: bool = false
+	for i: int in range(get_slide_collision_count()):
+		var collision: KinematicCollision3D = get_slide_collision(i)
+		var collider: Object = collision.get_collider()
+		if collider is RigidBody3D:
+			collided_with_rigidbody = true
+			break
+
+	# Si estaba en el suelo o colisionó con un RigidBody, anular cualquier velocidad vertical ascendente
+	if (was_grounded or collided_with_rigidbody) and velocity.y > 0.0:
+		velocity.y = 0.0
+
+	# Mantener anclaje al suelo firme si estaba apoyado
+	if was_grounded and is_on_floor():
+		velocity.y = minf(velocity.y, -0.1)
+
+## Empuje sutil a enemigos RigidBody3D para que no se sientan como muros estáticos al caminar contra ellos
+func _push_enemies() -> void:
+	for i: int in range(get_slide_collision_count()):
+		var collision: KinematicCollision3D = get_slide_collision(i)
+		var collider: Object = collision.get_collider()
+		if collider is RigidBody3D and (collider as Node3D).is_in_group("enemies"):
+			var rb: RigidBody3D = collider as RigidBody3D
+			var push_dir: Vector3 = -collision.get_normal()
+			push_dir.y = 0.0
+			if push_dir.length_squared() > 0.0001:
+				push_dir = push_dir.normalized()
+				var h_speed: float = Vector3(velocity.x, 0.0, velocity.z).length()
+				if h_speed > 0.1:
+					var push_impulse: float = h_speed * 0.12
+					rb.apply_central_impulse(push_dir * push_impulse)
+
+func _check_edge_overcharge() -> void:
+	var max_dist_to_center: float = maxf(absf(global_position.x), absf(global_position.z))
+	is_edge_overcharged = max_dist_to_center > 11.0 and is_on_floor()
 
 func _handle_timers(delta: float) -> void:
 	if dash_cooldown_timer > 0.0:
 		dash_cooldown_timer -= delta
 
+	if pull_cooldown_timer > 0.0:
+		pull_cooldown_timer -= delta
+
 	if pulse_cooldown_timer > 0.0:
-		pulse_cooldown_timer -= delta
+		var recharge_rate: float = 1.30 if is_edge_overcharged else 1.0
+		pulse_cooldown_timer -= delta * recharge_rate
 
 	if is_dashing:
 		dash_timer -= delta
@@ -104,19 +189,18 @@ func _apply_gravity(delta: float) -> void:
 	if not is_on_floor():
 		velocity.y -= gravity * delta
 	else:
-		if velocity.y < 0.0:
-			velocity.y = -0.1
+		velocity.y = -0.1
 
 func _handle_actions() -> void:
-	# Disparo de pulso cinético (Clic izquierdo)
 	if Input.is_action_just_pressed("fire") and pulse_cooldown_timer <= 0.0:
 		_fire_kinetic_pulse()
 
-	# Dash / Impulso horizontal (Espacio o Clic derecho)
+	if Input.is_action_just_pressed("pull") and pull_cooldown_timer <= 0.0:
+		_fire_pull()
+
 	if Input.is_action_just_pressed("dash") and dash_cooldown_timer <= 0.0:
 		_start_dash()
 
-	# Deslizamiento (Shift o Ctrl)
 	if Input.is_action_pressed("slide") and is_on_floor() and not is_sliding:
 		_start_slide()
 	elif not Input.is_action_pressed("slide") and is_sliding:
@@ -134,7 +218,6 @@ func _get_input_direction() -> Vector3:
 		input_dir.x += 1.0
 
 	input_dir = input_dir.normalized()
-	# Dirección relativa al forward (-Z) y right (+X) del jugador
 	var direction: Vector3 = (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
 	return direction
 
@@ -145,7 +228,6 @@ func _handle_movement(delta: float) -> void:
 		return
 
 	if is_sliding:
-		# En slide conservamos inercia con baja fricción
 		velocity.x = move_toward(velocity.x, 0.0, slide_friction * delta)
 		velocity.z = move_toward(velocity.z, 0.0, slide_friction * delta)
 		return
@@ -165,7 +247,6 @@ func _handle_movement(delta: float) -> void:
 func _start_dash() -> void:
 	var move_dir: Vector3 = _get_input_direction()
 	if move_dir == Vector3.ZERO:
-		# Si no hay input WASD, dashea hacia el frente del jugador (-Z)
 		dash_direction = -transform.basis.z.normalized()
 	else:
 		dash_direction = move_dir
@@ -173,7 +254,6 @@ func _start_dash() -> void:
 	is_dashing = true
 	dash_timer = dash_duration
 	dash_cooldown_timer = dash_cooldown
-	# Si estábamos deslizando, cancelamos para dar paso al dash
 	if is_sliding:
 		_stop_slide()
 
@@ -185,11 +265,9 @@ func _start_slide() -> void:
 	is_sliding = true
 	slide_timer = slide_duration
 	slide_direction = move_dir
-	# Impulso inicial de slide
 	velocity.x = slide_direction.x * slide_speed
 	velocity.z = slide_direction.z * slide_speed
 
-	# Postura agachada: modificar height del CapsuleShape3D y CapsuleMesh directamente
 	if collision_shape and collision_shape.shape is CapsuleShape3D:
 		var capsule_shape: CapsuleShape3D = collision_shape.shape as CapsuleShape3D
 		capsule_shape.height = 1.0
@@ -220,23 +298,102 @@ func _stop_slide() -> void:
 func _fire_kinetic_pulse() -> void:
 	pulse_cooldown_timer = pulse_cooldown
 	var shot_origin: Vector3 = camera.global_position
-	# La cámara mira hacia -Z en su espacio local
 	var shot_direction: Vector3 = -camera.global_transform.basis.z.normalized()
 
 	kinetic_cast.target_position = Vector3(0.0, 0.0, -pulse_range)
 	kinetic_cast.force_raycast_update()
 
+	add_screen_shake(0.12)
+
 	var hit_node: Node3D = null
 	if kinetic_cast.is_colliding():
 		var collider: Object = kinetic_cast.get_collider()
-		if collider is Node3D:
+		if collider is Node3D and collider != self and (collider as Node3D).is_in_group("enemies"):
 			hit_node = collider as Node3D
 			_apply_kinetic_impulse(hit_node, shot_direction)
 
+	# Garantizar que no se aplique ningún retroceso vertical en el eje Y
+	if is_on_floor():
+		velocity.y = -0.1
+	elif velocity.y > 0.0:
+		velocity.y = 0.0
+
 	pulse_fired.emit(shot_origin, shot_direction, hit_node)
 
+func get_pull_target_position() -> Vector3:
+	var cam_forward: Vector3 = -camera.global_transform.basis.z.normalized()
+	return camera.global_position + (cam_forward * 2.5) + (Vector3.UP * 1.0)
+
+func _fire_pull() -> void:
+	var enemy: Node3D = _find_pull_target()
+	if not enemy:
+		return
+
+	pull_cooldown_timer = pull_cooldown
+	add_screen_shake(0.22)
+
+	# Punto situado 2.5m frente a la cámara del jugador (+ Vector3.UP * 1.0)
+	var suspend_target: Vector3 = get_pull_target_position()
+
+	if enemy.has_method("apply_pull"):
+		enemy.call("apply_pull", suspend_target, self)
+	elif enemy is RigidBody3D:
+		var rb: RigidBody3D = enemy as RigidBody3D
+		rb.linear_velocity = Vector3.ZERO
+		rb.angular_velocity = Vector3.ZERO
+		rb.gravity_scale = 0.05
+		var pull_dir: Vector3 = suspend_target - rb.global_position
+		rb.apply_central_impulse(pull_dir.normalized() * 12.0)
+		var timer: SceneTreeTimer = get_tree().create_timer(0.6, true, false, true)
+		timer.timeout.connect(_restore_enemy_gravity.bind(rb))
+
+func _restore_enemy_gravity(target_rb: RigidBody3D) -> void:
+	if is_instance_valid(target_rb):
+		target_rb.gravity_scale = 1.0
+
+func _find_pull_target() -> Node3D:
+	kinetic_cast.target_position = Vector3(0.0, 0.0, -pulse_range)
+	kinetic_cast.force_raycast_update()
+
+	if kinetic_cast.is_colliding():
+		var col: Object = kinetic_cast.get_collider()
+		if col is Node3D and col != self and (col as Node3D).is_in_group("enemies"):
+			return col as Node3D
+
+	# Cono de asistencia y barrido esférico de radio 0.8m desde la cámara
+	var cam_pos: Vector3 = camera.global_position
+	var cam_dir: Vector3 = -camera.global_transform.basis.z.normalized()
+	var enemies: Array[Node] = get_tree().get_nodes_in_group("enemies")
+
+	var best_enemy: Node3D = null
+	var best_score: float = 9999.0
+
+	for node: Node in enemies:
+		if node == self or not (node is Node3D) or not is_instance_valid(node):
+			continue
+		var enemy: Node3D = node as Node3D
+		var to_enemy: Vector3 = enemy.global_position - cam_pos
+		var dist: float = to_enemy.length()
+		if dist < 0.5 or dist > pulse_range:
+			continue
+
+		var forward_proj: float = to_enemy.dot(cam_dir)
+		if forward_proj <= 0.0:
+			continue
+
+		var perp_dist: float = (to_enemy - cam_dir * forward_proj).length()
+		var max_allowed_perp: float = maxf(1.4, forward_proj * 0.18)
+		if perp_dist <= max_allowed_perp:
+			var score: float = perp_dist * 2.5 + (dist * 0.1)
+			if score < best_score:
+				best_score = score
+				best_enemy = enemy
+
+	return best_enemy
+
 func _apply_kinetic_impulse(target: Node3D, direction: Vector3) -> void:
-	# Lanzamiento con vector ligeramente elevado para parábola cinemática
+	if not target or target == self or not target.is_in_group("enemies"):
+		return
 	var launch_vector: Vector3 = (direction + Vector3(0.0, 0.25, 0.0)).normalized() * pulse_force
 	if target.has_method("apply_kinetic_impulse"):
 		target.call("apply_kinetic_impulse", launch_vector, GameManager.combo_count)
@@ -250,3 +407,18 @@ func _apply_kinetic_impulse(target: Node3D, direction: Vector3) -> void:
 	elif target.has_method("apply_impulse"):
 		target.call("apply_impulse", launch_vector)
 		EventBus.enemy_launched.emit(target, pulse_force)
+
+func add_screen_shake(amount: float) -> void:
+	shake_trauma = clampf(shake_trauma + amount, 0.0, 1.0)
+
+func _handle_screen_shake(delta: float) -> void:
+	if shake_trauma > 0.0:
+		shake_trauma = maxf(0.0, shake_trauma - SHAKE_DECAY * delta)
+		var shake_amount: float = shake_trauma * shake_trauma
+		camera.h_offset = randf_range(-0.15, 0.15) * shake_amount
+		camera.v_offset = randf_range(-0.15, 0.15) * shake_amount
+		camera.rotation.z = deg_to_rad(randf_range(-1.2, 1.2)) * shake_amount
+	else:
+		camera.h_offset = 0.0
+		camera.v_offset = 0.0
+		camera.rotation.z = 0.0

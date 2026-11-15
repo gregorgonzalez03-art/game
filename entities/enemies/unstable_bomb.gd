@@ -1,0 +1,163 @@
+extends RigidBody3D
+
+## Enemigo / Objeto Cinético Arquetipo: Unstable Bomb.
+## Masa 3.0 kg. Al ser lanzado o chocar a alta velocidad, detona una
+## onda expansiva radial que lanza a todos los cuerpos cercanos.
+
+@export var mass_weight: float = 3.0
+@export var blast_radius: float = 7.0
+@export var blast_force: float = 38.0
+@export var fuse_duration: float = 1.5
+@export var high_speed_threshold: float = 4.5
+
+var is_launched: bool = false
+var fuse_timer: float = 0.0
+var is_exploding: bool = false
+var pulse_time: float = 0.0
+
+# Estado de atracción magnética (Ganchazo)
+var is_being_pulled: bool = false
+var pull_target_pos: Vector3 = Vector3.ZERO
+var pull_timer: float = 0.0
+var pull_player_ref: Node3D = null
+
+@onready var visual_mesh: MeshInstance3D = $MeshInstance3D
+
+func _ready() -> void:
+	add_to_group("enemies")
+	add_to_group("bombs")
+	mass = mass_weight
+	contact_monitor = true
+	max_contacts_reported = 6
+	linear_damp = 1.0
+	angular_damp = 2.0
+	body_entered.connect(_on_body_entered)
+	freeze = false
+
+	# Asegurar desfreeze tras 0.4s
+	var tree: SceneTree = get_tree()
+	if tree:
+		tree.create_timer(0.4, false).timeout.connect(func() -> void:
+			if is_instance_valid(self):
+				freeze = false
+		)
+
+	if visual_mesh and visual_mesh.material_override:
+		visual_mesh.material_override = visual_mesh.material_override.duplicate()
+
+func _physics_process(delta: float) -> void:
+	var h_dist: float = Vector2(global_position.x, global_position.z).length()
+	if global_position.y < -5.0 or h_dist > 22.0:
+		if is_in_group("enemies"):
+			remove_from_group("enemies")
+			EventBus.enemy_eliminated.emit(self, GameManager.combo_count)
+		queue_free()
+		return
+
+	if is_being_pulled:
+		_process_pull(delta)
+		return
+
+	if is_launched and not is_exploding:
+		fuse_timer -= delta
+		pulse_time += delta * 12.0
+
+		if visual_mesh and visual_mesh.material_override:
+			var mat: StandardMaterial3D = visual_mesh.material_override as StandardMaterial3D
+			if mat:
+				mat.emission_energy_multiplier = 2.0 + sin(pulse_time) * 1.5
+
+		if fuse_timer <= 0.0:
+			explode()
+
+func apply_kinetic_impulse(impulse: Vector3, _combo_level: int, _is_chain: bool = false) -> void:
+	is_being_pulled = false
+	gravity_scale = 1.0
+	is_launched = true
+	fuse_timer = fuse_duration
+	linear_damp = 0.05
+	apply_central_impulse(impulse)
+	EventBus.enemy_launched.emit(self, impulse.length())
+
+func apply_pull(target_pos: Vector3, player_node: Node3D = null) -> void:
+	is_being_pulled = true
+	pull_target_pos = target_pos
+	pull_player_ref = player_node
+	pull_timer = 0.6
+	linear_velocity = Vector3.ZERO
+	angular_velocity = Vector3.ZERO
+	gravity_scale = 0.05
+
+func _process_pull(delta: float) -> void:
+	pull_timer -= delta
+	if pull_player_ref and is_instance_valid(pull_player_ref) and pull_player_ref.has_method("get_pull_target_position"):
+		pull_target_pos = pull_player_ref.call("get_pull_target_position")
+
+	var diff: Vector3 = pull_target_pos - global_position
+	var dist: float = diff.length()
+
+	if dist < 0.8 or pull_timer <= 0.0:
+		is_being_pulled = false
+		linear_velocity = Vector3.ZERO
+		angular_velocity = Vector3.ZERO
+		gravity_scale = 0.05
+		var hover_timer: SceneTreeTimer = get_tree().create_timer(0.6, true, false, true)
+		hover_timer.timeout.connect(_on_pull_release)
+	else:
+		var pull_speed: float = clampf(dist * 9.0, 12.0, 26.0)
+		linear_velocity = diff.normalized() * pull_speed
+
+func _on_pull_release() -> void:
+	if not is_being_pulled and not is_launched:
+		gravity_scale = 1.0
+
+func _on_body_entered(_body: Node) -> void:
+	if is_launched:
+		explode()
+
+func explode() -> void:
+	if is_exploding:
+		return
+	is_exploding = true
+	remove_from_group("enemies")
+
+	var bomb_pos: Vector3 = global_position
+	var space_state: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	var shape: SphereShape3D = SphereShape3D.new()
+	shape.radius = blast_radius
+
+	var query: PhysicsShapeQueryParameters3D = PhysicsShapeQueryParameters3D.new()
+	query.shape = shape
+	query.transform = Transform3D(Basis(), bomb_pos)
+	query.collision_mask = 0xFFFFFFFF
+
+	var results: Array[Dictionary] = space_state.intersect_shape(query, 32)
+	for item: Dictionary in results:
+		var collider: Object = item.get("collider")
+		if collider is Node3D and collider != self:
+			var target_node: Node3D = collider as Node3D
+			var diff: Vector3 = target_node.global_position - bomb_pos
+			var dist: float = diff.length()
+			if dist < 0.001:
+				diff = Vector3(0.0, 1.0, 0.0)
+				dist = 1.0
+
+			var factor: float = clampf(1.0 - (dist / blast_radius), 0.2, 1.0)
+			var blast_dir: Vector3 = (diff.normalized() + Vector3(0.0, 0.35, 0.0)).normalized()
+			var blast_impulse: Vector3 = blast_dir * (blast_force * factor)
+
+			if target_node.has_method("apply_kinetic_impulse"):
+				target_node.call("apply_kinetic_impulse", blast_impulse, GameManager.combo_count)
+			elif target_node is RigidBody3D:
+				var rb: RigidBody3D = target_node as RigidBody3D
+				rb.apply_central_impulse(blast_impulse)
+			elif target_node.is_in_group("player"):
+				if target_node.has_method("add_screen_shake"):
+					target_node.call("add_screen_shake", 0.6)
+
+	# Hit-stop centralizado exclusivamente en GameManager
+	GameManager.trigger_hit_stop(0.05)
+
+	GameManager.add_combo()
+	EventBus.chain_collision.emit(GameManager.combo_count, bomb_pos)
+	queue_free()

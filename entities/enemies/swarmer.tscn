@@ -3,8 +3,8 @@
 [ext_resource type="Script" path="res://entities/enemies/swarmer.gd" id="1_swarmer"]
 
 [sub_resource type="PhysicsMaterial" id="PhysicsMaterial_swarmer"]
-bounce = 0.4
-absorbent = true
+friction = 0.5
+bounce = 0.3
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_swarmer"]
 radius = 0.5
@@ -22,6 +22,8 @@ radius = 0.5
 height = 1.0
 
 [node name="Swarmer" type="RigidBody3D" groups=["enemies"]]
+collision_layer = 4
+collision_mask = 7
 mass = 1.5
 physics_material_override = SubResource("PhysicsMaterial_swarmer")
 contact_monitor = true

@@ -1,0 +1,39 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://entities/enemies/unstable_bomb.gd" id="1_bomb"]
+
+[sub_resource type="PhysicsMaterial" id="PhysicsMaterial_bomb"]
+friction = 0.5
+bounce = 0.3
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_bomb"]
+radius = 0.6
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_bomb"]
+albedo_color = Color(1, 0.45, 0.05, 1)
+roughness = 0.25
+emission_enabled = true
+emission = Color(1, 0.4, 0, 1)
+emission_energy_multiplier = 1.6
+
+[sub_resource type="SphereMesh" id="SphereMesh_bomb"]
+material = SubResource("StandardMaterial3D_bomb")
+radius = 0.6
+height = 1.2
+
+[node name="UnstableBomb" type="RigidBody3D" groups=["enemies"]]
+collision_layer = 4
+collision_mask = 7
+mass = 3.0
+physics_material_override = SubResource("PhysicsMaterial_bomb")
+contact_monitor = true
+max_contacts_reported = 4
+linear_damp = 1.0
+angular_damp = 2.0
+script = ExtResource("1_bomb")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("SphereShape3D_bomb")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+mesh = SubResource("SphereMesh_bomb")

@@ -1,0 +1,42 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://entities/enemies/brute.gd" id="1_brute"]
+
+[sub_resource type="PhysicsMaterial" id="PhysicsMaterial_brute"]
+bounce = 0.2
+absorbent = true
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_brute"]
+height = 2.2
+radius = 0.9
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_brute"]
+albedo_color = Color(0.3, 0.08, 0.45, 1)
+metallic = 0.3
+roughness = 0.4
+emission_enabled = true
+emission = Color(0.4, 0.05, 0.5, 1)
+emission_energy_multiplier = 0.8
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_brute"]
+material = SubResource("StandardMaterial3D_brute")
+top_radius = 0.8
+bottom_radius = 0.9
+height = 2.2
+
+[node name="Brute" type="RigidBody3D" groups=["enemies"]]
+collision_layer = 4
+collision_mask = 7
+mass = 25.0
+physics_material_override = SubResource("PhysicsMaterial_brute")
+contact_monitor = true
+max_contacts_reported = 6
+linear_damp = 1.5
+angular_damp = 3.0
+script = ExtResource("1_brute")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("CylinderShape3D_brute")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+mesh = SubResource("CylinderMesh_brute")

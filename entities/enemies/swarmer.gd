@@ -2,7 +2,7 @@ extends RigidBody3D
 
 ## Enemigo Cinético Arquetipo: Swarmer.
 ## RigidBody3D con persecución suave, modo proyectil (disco de hockey),
-## asistencia magnética de hasta 15 grados y hit-stop en colisiones en cadena.
+## asistencia magnética de hasta 15 grados y frenado magnético al ser atraído.
 
 @export var mass_weight: float = 1.5
 @export var pursue_speed: float = 4.5
@@ -15,29 +15,62 @@ const PROJECTILE_LINEAR_DAMP: float = 0.05
 const PROJECTILE_DURATION: float = 1.2
 const MAX_MAGNETIC_ANGLE_DEG: float = 15.0
 const MAGNETIC_SEARCH_RADIUS: float = 25.0
+const PUSH_FORCE: float = 5.0
+const PUSH_COOLDOWN: float = 0.35
 
 var is_launched: bool = false
 var projectile_timer: float = 0.0
 var player_ref: Node3D = null
+var push_cooldown_timer: float = 0.0
+
+# Estado de atracción magnética (Ganchazo)
+var is_being_pulled: bool = false
+var pull_target_pos: Vector3 = Vector3.ZERO
+var pull_timer: float = 0.0
+var pull_player_ref: Node3D = null
 
 @onready var visual_mesh: MeshInstance3D = $MeshInstance3D
 
 func _ready() -> void:
 	add_to_group("enemies")
+	add_to_group("swarmers")
 	mass = mass_weight
 	contact_monitor = true
 	max_contacts_reported = 6
 	linear_damp = NORMAL_LINEAR_DAMP
 	angular_damp = 2.0
 	body_entered.connect(_on_body_entered)
+	freeze = false
+
+	# Asegurar desfreeze tras 0.4s
+	var tree: SceneTree = get_tree()
+	if tree:
+		tree.create_timer(0.4, false).timeout.connect(func() -> void:
+			if is_instance_valid(self):
+				freeze = false
+		)
 
 func _physics_process(delta: float) -> void:
+	var h_dist: float = Vector2(global_position.x, global_position.z).length()
+	if global_position.y < -5.0 or h_dist > 22.0:
+		if is_in_group("enemies"):
+			remove_from_group("enemies")
+			EventBus.enemy_eliminated.emit(self, GameManager.combo_count)
+		queue_free()
+		return
+
+	if push_cooldown_timer > 0.0:
+		push_cooldown_timer -= delta
+
+	if is_being_pulled:
+		_process_pull(delta)
+		return
+
 	if projectile_timer > 0.0:
 		projectile_timer -= delta
 		if projectile_timer <= 0.0:
 			linear_damp = NORMAL_LINEAR_DAMP
 		else:
-			# Guía magnética sutil mientras vuela como proyectil
 			_apply_in_flight_magnetic_guidance(delta)
 
 	var current_speed: float = linear_velocity.length()
@@ -45,7 +78,40 @@ func _physics_process(delta: float) -> void:
 		is_launched = false
 
 	if not is_launched:
+		_check_player_contact()
 		_pursue_player()
+
+func apply_pull(target_pos: Vector3, player_node: Node3D = null) -> void:
+	is_being_pulled = true
+	pull_target_pos = target_pos
+	pull_player_ref = player_node
+	pull_timer = 0.6
+	linear_velocity = Vector3.ZERO
+	angular_velocity = Vector3.ZERO
+	gravity_scale = 0.05
+
+func _process_pull(delta: float) -> void:
+	pull_timer -= delta
+	if pull_player_ref and is_instance_valid(pull_player_ref) and pull_player_ref.has_method("get_pull_target_position"):
+		pull_target_pos = pull_player_ref.call("get_pull_target_position")
+
+	var diff: Vector3 = pull_target_pos - global_position
+	var dist: float = diff.length()
+
+	if dist < 0.8 or pull_timer <= 0.0:
+		is_being_pulled = false
+		linear_velocity = Vector3.ZERO
+		angular_velocity = Vector3.ZERO
+		gravity_scale = 0.05
+		var hover_timer: SceneTreeTimer = get_tree().create_timer(0.6, true, false, true)
+		hover_timer.timeout.connect(_on_pull_release)
+	else:
+		var pull_speed: float = clampf(dist * 9.0, 12.0, 26.0)
+		linear_velocity = diff.normalized() * pull_speed
+
+func _on_pull_release() -> void:
+	if not is_being_pulled and not is_launched:
+		gravity_scale = 1.0
 
 func _pursue_player() -> void:
 	if not player_ref or not is_instance_valid(player_ref):
@@ -65,23 +131,22 @@ func _pursue_player() -> void:
 			apply_central_force(dir * pursue_force)
 
 ## Impacto cinético recibido: activa el Modo Proyectil con asistencia magnética
-func apply_kinetic_impulse(impulse: Vector3, combo_level: int) -> void:
+func apply_kinetic_impulse(impulse: Vector3, combo_level: int, _is_chain: bool = false) -> void:
+	is_being_pulled = false
+	gravity_scale = 1.0
 	is_launched = true
 	projectile_timer = PROJECTILE_DURATION
 	linear_damp = PROJECTILE_LINEAR_DAMP
 
-	# Asistencia magnética inicial de hasta 15 grados hacia el enemigo más cercano en trayectoria
 	var assisted_impulse: Vector3 = _calculate_magnetic_assistance(impulse)
 	apply_central_impulse(assisted_impulse)
 	EventBus.enemy_launched.emit(self, assisted_impulse.length())
 
-	# Sobrecarga visual momentánea
 	if visual_mesh and visual_mesh.material_override:
 		var mat: StandardMaterial3D = visual_mesh.material_override as StandardMaterial3D
 		if mat:
 			mat.emission_energy_multiplier = 2.5 + float(combo_level) * 0.5
 
-## Calcula la desviación asistida de hasta 15 grados hacia el objetivo más prometedor
 func _calculate_magnetic_assistance(raw_impulse: Vector3) -> Vector3:
 	var impulse_speed: float = raw_impulse.length()
 	if impulse_speed < 0.001:
@@ -101,12 +166,10 @@ func _calculate_magnetic_assistance(raw_impulse: Vector3) -> Vector3:
 	if angle_rad <= 0.001:
 		return raw_impulse
 
-	# Rotación esférica limitada al máximo de 15 grados
 	var steer_weight: float = clampf(max_angle_rad / angle_rad, 0.0, 1.0)
 	var assisted_dir: Vector3 = raw_dir.slerp(target_dir, steer_weight).normalized()
 	return assisted_dir * impulse_speed
 
-## Guía magnética sutil durante el vuelo en modo proyectil
 func _apply_in_flight_magnetic_guidance(delta: float) -> void:
 	var speed: float = linear_velocity.length()
 	if speed < high_speed_threshold:
@@ -124,7 +187,6 @@ func _apply_in_flight_magnetic_guidance(delta: float) -> void:
 		var guided_dir: Vector3 = current_dir.slerp(target_dir, turn_rate).normalized()
 		linear_velocity = guided_dir * speed
 
-## Encuentra el enemigo más cercano dentro del cono de 15 grados
 func _find_best_magnetic_target(forward_dir: Vector3) -> Node3D:
 	var enemies: Array[Node] = get_tree().get_nodes_in_group("enemies")
 	var best_candidate: Node3D = null
@@ -151,8 +213,35 @@ func _find_best_magnetic_target(forward_dir: Vector3) -> Node3D:
 
 	return best_candidate
 
-## Colisión en cadena entre enemigos a alta velocidad con hit-stop visceral
+func _check_player_contact() -> void:
+	if push_cooldown_timer > 0.0:
+		return
+	for body: Node in get_colliding_bodies():
+		if body is Node3D and body.is_in_group("player"):
+			_try_push_player(body as Node3D)
+			break
+
+func _try_push_player(player_node: Node3D) -> void:
+	if push_cooldown_timer > 0.0:
+		return
+	push_cooldown_timer = PUSH_COOLDOWN
+
+	var push_dir: Vector3 = (player_node.global_position - global_position).normalized()
+	push_dir.y = 0.0
+	if push_dir.length_squared() < 0.0001:
+		push_dir = -global_transform.basis.z
+	push_dir = push_dir.normalized()
+
+	if player_node.has_method("apply_knockback"):
+		player_node.call("apply_knockback", push_dir * PUSH_FORCE)
+	if player_node.has_method("add_screen_shake"):
+		player_node.call("add_screen_shake", 0.06)
+
 func _on_body_entered(body: Node) -> void:
+	if body is Node3D and body.is_in_group("player"):
+		_try_push_player(body as Node3D)
+		return
+
 	if not is_launched:
 		return
 
@@ -169,16 +258,7 @@ func _on_body_entered(body: Node) -> void:
 
 			var transfer_impulse: Vector3 = (transfer_dir + Vector3(0.0, 0.2, 0.0)).normalized() * (speed * chain_multiplier)
 
-			_trigger_hit_stop()
-
+			GameManager.trigger_hit_stop(0.05)
 			GameManager.add_combo()
 			EventBus.chain_collision.emit(GameManager.combo_count, global_position)
 			other_enemy.call("apply_kinetic_impulse", transfer_impulse, GameManager.combo_count)
-
-func _trigger_hit_stop() -> void:
-	Engine.time_scale = 0.05
-	var timer: SceneTreeTimer = get_tree().create_timer(0.05, true, false, true)
-	timer.timeout.connect(_on_hit_stop_timeout)
-
-func _on_hit_stop_timeout() -> void:
-	Engine.time_scale = 1.0
