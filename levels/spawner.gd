@@ -257,6 +257,10 @@ func _spawn_single_enemy(scene_to_spawn: PackedScene) -> Node3D:
 
 	add_child(enemy)
 
+	# Escalado Progresivo por Oleada (Paso 4.2)
+	if enemy.has_method("apply_wave_scaling"):
+		enemy.call("apply_wave_scaling", current_wave)
+
 	# Spawn directamente sobre la superficie (Y = 1.5)
 	var spawn_pos: Vector3 = Vector3(randf_range(-12.0, 12.0), SURFACE_Y, randf_range(-12.0, 12.0))
 	enemy.global_position = spawn_pos

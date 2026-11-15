@@ -3,6 +3,13 @@ extends CharacterBody3D
 ## Controlador cinético en tercera persona estilo Risk of Rain 2.
 ## Cumple estrictamente con AGENTS.md (Godot 4.x, tipado estricto, -Z adelante).
 
+const PULSE_BURST_SCENE: PackedScene = preload("res://entities/effects/kinetic_pulse_burst.tscn")
+const KineticPulseBurstScript = preload("res://entities/effects/kinetic_pulse_burst.gd")
+
+# Feedback de Cámara FOV (Paso 4.2)
+const BASE_FOV: float = 75.0
+var fov_kick_tween: Tween = null
+
 signal pulse_fired(origin: Vector3, direction: Vector3, hit_collider: Node3D)
 
 @export var move_speed: float = 8.0
@@ -61,6 +68,14 @@ var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity", 9
 @onready var visual_mesh: MeshInstance3D = $VisualMesh
 @onready var collision_shape: CollisionShape3D = $CollisionShape3D
 
+# VFX del Ganchazo Magnético (Fase 4.2)
+var _pulled_enemy: Node3D = null
+var _pull_vfx_active: bool = false
+var _pull_vfx_timer: float = 0.0
+var _beam_root: Node3D = null
+var _beam_mesh_instance: MeshInstance3D = null
+var _orbital_ring: Node3D = null
+
 func _ready() -> void:
 	add_to_group("player")
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -79,8 +94,11 @@ func _ready() -> void:
 	kinetic_cast.collide_with_bodies = true
 	kinetic_cast.add_exception(self)
 
+	_setup_pull_vfx()
+
 func _process(delta: float) -> void:
 	_handle_screen_shake(delta)
+	_process_pull_vfx(delta)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
@@ -310,6 +328,10 @@ func _fire_kinetic_pulse() -> void:
 	kinetic_cast.force_raycast_update()
 
 	add_screen_shake(0.12)
+	_apply_camera_fov_kick()
+
+	# VFX Estallido cinético cónico compuesto con partículas y ondas de choque (Fase 4.2)
+	_spawn_pulse_burst_vfx(shot_origin, shot_direction)
 
 	var hit_node: Node3D = null
 	if kinetic_cast.is_colliding():
@@ -324,11 +346,18 @@ func _fire_kinetic_pulse() -> void:
 				hit_node = target_node
 				_apply_kinetic_impulse(hit_node, shot_direction)
 
+			if hit_node == _pulled_enemy:
+				_stop_pull_vfx()
+
 			# Sinergia shockwave_pulse: empuje radial secundario a enemigos cercanos
 			var shockwave_stacks: int = GameManager.get_upgrade_stacks("shockwave_pulse")
 			if shockwave_stacks > 0 and hit_node != null:
 				var aoe_radius: float = 4.0 * (1.0 + float(shockwave_stacks - 1) * 0.25)
 				var aoe_force: float = pulse_force * 0.6 * (1.0 + float(shockwave_stacks - 1) * 0.25)
+
+				# VFX Destello circular en el punto de impacto que representa el radio del empuje (Paso 4.2)
+				KineticPulseBurstScript.spawn_shockwave_splash(get_tree().current_scene, cached_hit_pos, aoe_radius)
+
 				for enemy_node: Node in get_tree().get_nodes_in_group("enemies"):
 					if not is_instance_valid(enemy_node) or enemy_node == hit_node or not (enemy_node is Node3D):
 						continue
@@ -361,6 +390,9 @@ func _fire_pull() -> void:
 	var enemy: Node3D = _find_pull_target()
 	if not enemy:
 		return
+
+	# VFX del Ganchazo Magnético y Anillo Orbital (Paso 4.2)
+	_start_pull_vfx(enemy)
 
 	var overdrive_stacks: int = GameManager.get_upgrade_stacks("kinetic_overdrive")
 	var cd_multiplier: float = pow(0.8, float(overdrive_stacks))
@@ -483,3 +515,136 @@ func _handle_screen_shake(delta: float) -> void:
 		camera.h_offset = 0.0
 		camera.v_offset = 0.0
 		camera.rotation.z = 0.0
+
+# ==============================================================================
+# SISTEMA DE FEEDBACK VISUAL (VFX) - FASE 4.2
+# ==============================================================================
+
+func _spawn_pulse_burst_vfx(origin: Vector3, dir: Vector3) -> void:
+	if not PULSE_BURST_SCENE or not is_inside_tree():
+		return
+	var burst: Node3D = PULSE_BURST_SCENE.instantiate() as Node3D
+	if not burst:
+		return
+	var root: Node = get_tree().current_scene
+	if not root:
+		return
+	root.add_child(burst)
+	if burst.has_method("play"):
+		burst.call("play", origin + dir * 0.5, dir)
+
+func _apply_camera_fov_kick() -> void:
+	if not camera:
+		return
+	if fov_kick_tween and fov_kick_tween.is_valid():
+		fov_kick_tween.kill()
+	fov_kick_tween = create_tween()
+	fov_kick_tween.tween_property(camera, "fov", BASE_FOV + 3.5, 0.04).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	fov_kick_tween.tween_property(camera, "fov", BASE_FOV, 0.15).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+
+func _setup_pull_vfx() -> void:
+	# Haz/rayo magnético de energía cian/eléctrico
+	_beam_root = Node3D.new()
+	_beam_root.name = "PullBeamVFX"
+	_beam_root.top_level = true
+	_beam_root.visible = false
+	add_child(_beam_root)
+
+	_beam_mesh_instance = MeshInstance3D.new()
+	var cyl: CylinderMesh = CylinderMesh.new()
+	cyl.top_radius = 0.04
+	cyl.bottom_radius = 0.04
+	cyl.height = 1.0
+	cyl.radial_segments = 8
+	_beam_mesh_instance.mesh = cyl
+	_beam_mesh_instance.rotation_degrees = Vector3(90.0, 0.0, 0.0)
+
+	var beam_mat: StandardMaterial3D = StandardMaterial3D.new()
+	beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	beam_mat.albedo_color = Color(0.1, 0.95, 1.0, 0.9)
+	beam_mat.emission_enabled = true
+	beam_mat.emission = Color(0.0, 1.0, 1.0, 1.0)
+	beam_mat.emission_energy_multiplier = 4.0
+	_beam_mesh_instance.material_override = beam_mat
+	_beam_root.add_child(_beam_mesh_instance)
+
+	# Anillo orbital brillante alrededor del objetivo suspendido
+	_orbital_ring = Node3D.new()
+	_orbital_ring.name = "PullOrbitalRingVFX"
+	_orbital_ring.top_level = true
+	_orbital_ring.visible = false
+	add_child(_orbital_ring)
+
+	var ring_mesh_inst: MeshInstance3D = MeshInstance3D.new()
+	var torus: TorusMesh = TorusMesh.new()
+	torus.inner_radius = 0.65
+	torus.outer_radius = 0.8
+	torus.rings = 28
+	torus.ring_segments = 16
+	ring_mesh_inst.mesh = torus
+
+	var ring_mat: StandardMaterial3D = StandardMaterial3D.new()
+	ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ring_mat.albedo_color = Color(0.0, 1.0, 0.85, 0.95)
+	ring_mat.emission_enabled = true
+	ring_mat.emission = Color(0.0, 1.0, 0.85, 1.0)
+	ring_mat.emission_energy_multiplier = 4.5
+	ring_mesh_inst.material_override = ring_mat
+	_orbital_ring.add_child(ring_mesh_inst)
+
+func _start_pull_vfx(enemy: Node3D) -> void:
+	_pulled_enemy = enemy
+	_pull_vfx_active = true
+	_pull_vfx_timer = 1.3
+	if _beam_root:
+		_beam_root.visible = true
+	if _orbital_ring:
+		_orbital_ring.visible = true
+
+func _stop_pull_vfx() -> void:
+	_pull_vfx_active = false
+	_pulled_enemy = null
+	if _beam_root:
+		_beam_root.visible = false
+	if _orbital_ring:
+		_orbital_ring.visible = false
+
+func _process_pull_vfx(delta: float) -> void:
+	if not _pull_vfx_active:
+		return
+
+	if not is_instance_valid(_pulled_enemy) or _pulled_enemy.get("is_dead") == true or _pulled_enemy.get("is_launched") == true:
+		_stop_pull_vfx()
+		return
+
+	_pull_vfx_timer -= delta
+	if _pull_vfx_timer <= 0.0:
+		_stop_pull_vfx()
+		return
+
+	var enemy_pos: Vector3 = _pulled_enemy.global_position
+	var start_pos: Vector3 = global_position + Vector3(0.0, 1.1, 0.0)
+
+	# 1. Haz magnético estirado dinámicamente entre el jugador y el objetivo
+	var diff: Vector3 = enemy_pos - start_pos
+	var dist: float = diff.length()
+	if dist > 0.1 and _beam_root and _beam_mesh_instance:
+		_beam_root.visible = true
+		_beam_root.global_position = start_pos + diff * 0.5
+		var up_dir: Vector3 = Vector3.UP if abs(diff.normalized().y) < 0.95 else Vector3.RIGHT
+		_beam_root.look_at(enemy_pos, up_dir)
+		var jitter: float = 1.0 + sin(float(Time.get_ticks_msec()) * 0.03) * 0.2
+		_beam_mesh_instance.scale = Vector3(jitter, jitter, dist)
+	elif _beam_root:
+		_beam_root.visible = false
+
+	# 2. Anillo orbital giratorio alrededor del enemigo suspendido
+	if _orbital_ring:
+		_orbital_ring.visible = true
+		_orbital_ring.global_position = enemy_pos + Vector3(0.0, 0.1, 0.0)
+		_orbital_ring.rotate_y(delta * 6.5)
+		_orbital_ring.rotate_object_local(Vector3(1.0, 0.0, 0.5).normalized(), delta * 3.0)
+		var ring_pulse: float = 1.0 + sin(float(Time.get_ticks_msec()) * 0.015) * 0.12
+		_orbital_ring.scale = Vector3(ring_pulse, ring_pulse, ring_pulse)

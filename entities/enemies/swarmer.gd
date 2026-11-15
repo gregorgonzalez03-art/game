@@ -6,6 +6,7 @@ extends RigidBody3D
 
 @export var mass_weight: float = 1.5
 @export var pursue_speed: float = 4.5
+@export var move_speed: float = 4.5
 @export var pursue_force: float = 14.0
 @export var high_speed_threshold: float = 6.0
 @export var chain_multiplier: float = 1.4
@@ -17,6 +18,8 @@ const MAX_MAGNETIC_ANGLE_DEG: float = 15.0
 const MAGNETIC_SEARCH_RADIUS: float = 25.0
 const PUSH_FORCE: float = 5.0
 const PUSH_COOLDOWN: float = 0.35
+
+var push_force: float = PUSH_FORCE
 
 const ENEMY_SHADER: Shader = preload("res://entities/effects/enemy_hit_fresnel.gdshader")
 
@@ -326,9 +329,20 @@ func _try_push_player(player_node: Node3D) -> void:
 	push_dir = push_dir.normalized()
 
 	if player_node.has_method("apply_knockback"):
-		player_node.call("apply_knockback", push_dir * PUSH_FORCE)
+		player_node.call("apply_knockback", push_dir * push_force)
 	if player_node.has_method("add_screen_shake"):
 		player_node.call("add_screen_shake", 0.06)
+
+## Escalado Progresivo por Oleada (Paso 4.2)
+func apply_wave_scaling(wave_num: int) -> void:
+	var wave_scale: float = 1.0 + float(wave_num - 1) * 0.05
+	var speed_multiplier: float = minf(wave_scale, 1.6)
+	move_speed = 4.5 * speed_multiplier
+	pursue_speed = move_speed
+	pursue_force = 14.0 * speed_multiplier
+
+	var push_multiplier: float = 1.0 + float(wave_num - 1) * 0.04
+	push_force = PUSH_FORCE * push_multiplier
 
 func _on_body_entered(body: Node) -> void:
 	if body is Node3D and body.is_in_group("player"):

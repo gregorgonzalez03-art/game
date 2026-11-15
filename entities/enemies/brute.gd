@@ -18,6 +18,8 @@ const TOTAL_BURST_SHOTS: int = 3
 const SUBMERGED_DURATION: float = 1.5
 const ARENA_RADIUS: float = 9.0
 
+var max_hp: float = MAX_HP
+var burst_interval: float = BURST_SHOT_INTERVAL
 var current_hp: float = 145.0
 var is_submerged: bool = false
 var is_emerging: bool = false
@@ -131,7 +133,7 @@ func _handle_surface_phase(delta: float) -> void:
 		if burst_timer <= 0.0:
 			_fire_plasma_shot()
 			burst_shots_fired += 1
-			burst_timer = BURST_SHOT_INTERVAL
+			burst_timer = burst_interval
 
 	if surface_timer <= 0.0:
 		submerge_and_heal()
@@ -169,7 +171,7 @@ func submerge_and_heal() -> void:
 	collision_shape.set_deferred("disabled", true)
 
 	# Recupera un 25% de su vida máxima y actualiza grietas
-	current_hp = minf(MAX_HP, current_hp + (MAX_HP * 0.25))
+	current_hp = minf(max_hp, current_hp + (max_hp * 0.25))
 	_update_cracks()
 
 	var tween: Tween = create_tween()
@@ -211,9 +213,20 @@ func take_damage(amount: float, _hit_source_pos: Vector3 = Vector3.ZERO) -> void
 func _update_cracks() -> void:
 	if not shader_mat:
 		return
-	var crack_ratio: float = (1.0 - (current_hp / MAX_HP)) * 0.35
+	var crack_ratio: float = (1.0 - (current_hp / max_hp)) * 0.35
 	shader_mat.set_shader_parameter("dissolve_amount", clampf(crack_ratio, 0.0, 0.35))
 	shader_mat.set_shader_parameter("emission_energy", 0.9 + (crack_ratio * 3.5))
+
+## Escalado Progresivo por Oleada (Paso 4.2)
+func apply_wave_scaling(wave_num: int) -> void:
+	if wave_num >= 4:
+		var hp_scaling: float = 1.0 + float(wave_num - 3) * 0.08
+		max_hp = MAX_HP * hp_scaling
+		current_hp = max_hp
+		_update_cracks()
+
+	var interval_reduction: float = 1.0 - float(wave_num - 1) * 0.05
+	burst_interval = maxf(0.9, BURST_SHOT_INTERVAL * interval_reduction)
 
 func _play_damage_shake() -> void:
 	if not visual_mesh:
