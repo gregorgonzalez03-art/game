@@ -118,8 +118,16 @@ func _get_alive_enemies() -> Array[RigidBody3D]:
 		var rb: RigidBody3D = child as RigidBody3D
 		var h_dist: float = Vector2(rb.global_position.x, rb.global_position.z).length()
 
-		# Límites jugables de la plataforma (Y > -4.0 y distancia horizontal < 20.0m)
-		if rb.global_position.y <= -4.0 or h_dist >= 20.0:
+		# Límites jugables de la plataforma:
+		# Los Brutes monolíticos pueden sumergirse a Y = -2.5 sin considerarse eliminados
+		var is_submerged_brute: bool = _is_brute(rb) and (bool(rb.get("is_submerged")) or rb.global_position.y >= -3.5)
+		if not is_submerged_brute and (rb.global_position.y <= -4.0 or h_dist >= 20.0):
+			if rb.is_in_group("enemies"):
+				rb.remove_from_group("enemies")
+				EventBus.enemy_eliminated.emit(rb, GameManager.combo_count)
+			rb.queue_free()
+			continue
+		elif is_submerged_brute and h_dist >= 20.0:
 			if rb.is_in_group("enemies"):
 				rb.remove_from_group("enemies")
 				EventBus.enemy_eliminated.emit(rb, GameManager.combo_count)
@@ -253,12 +261,14 @@ func _spawn_single_enemy(scene_to_spawn: PackedScene) -> Node3D:
 	var spawn_pos: Vector3 = Vector3(randf_range(-12.0, 12.0), SURFACE_Y, randf_range(-12.0, 12.0))
 	enemy.global_position = spawn_pos
 
-	# Efecto de emerger animando la escala únicamente de su hijo MeshInstance3D
-	var mesh: MeshInstance3D = enemy.get_node_or_null("MeshInstance3D") as MeshInstance3D
-	if mesh:
-		mesh.scale = Vector3(0.01, 0.01, 0.01)
+	# Efecto de emerger animando la escala de su nodo visual (VisualMesh o MeshInstance3D)
+	var visual: Node3D = enemy.get_node_or_null("VisualMesh") as Node3D
+	if not visual:
+		visual = enemy.get_node_or_null("MeshInstance3D") as Node3D
+	if visual:
+		visual.scale = Vector3(0.01, 0.01, 0.01)
 		var tween: Tween = create_tween()
-		tween.tween_property(mesh, "scale", Vector3.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tween.tween_property(visual, "scale", Vector3.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 	return enemy
 

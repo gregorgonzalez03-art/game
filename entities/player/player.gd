@@ -314,28 +314,34 @@ func _fire_kinetic_pulse() -> void:
 	var hit_node: Node3D = null
 	if kinetic_cast.is_colliding():
 		var collider: Object = kinetic_cast.get_collider()
-		if collider is Node3D and collider != self and (collider as Node3D).is_in_group("enemies"):
-			hit_node = collider as Node3D
-			_apply_kinetic_impulse(hit_node, shot_direction)
+		if collider is Node3D and collider != self:
+			var target_node: Node3D = collider as Node3D
+			var cached_hit_pos: Vector3 = target_node.global_position
+			if target_node.has_method("deflect"):
+				hit_node = target_node
+				target_node.call("deflect", shot_direction)
+			elif target_node.is_in_group("enemies"):
+				hit_node = target_node
+				_apply_kinetic_impulse(hit_node, shot_direction)
 
 			# Sinergia shockwave_pulse: empuje radial secundario a enemigos cercanos
 			var shockwave_stacks: int = GameManager.get_upgrade_stacks("shockwave_pulse")
-			if shockwave_stacks > 0:
+			if shockwave_stacks > 0 and hit_node != null:
 				var aoe_radius: float = 4.0 * (1.0 + float(shockwave_stacks - 1) * 0.25)
 				var aoe_force: float = pulse_force * 0.6 * (1.0 + float(shockwave_stacks - 1) * 0.25)
-				var hit_pos: Vector3 = hit_node.global_position
 				for enemy_node: Node in get_tree().get_nodes_in_group("enemies"):
-					if enemy_node != hit_node and enemy_node is Node3D and is_instance_valid(enemy_node):
-						var other_enemy: Node3D = enemy_node as Node3D
-						var diff: Vector3 = other_enemy.global_position - hit_pos
-						var dist: float = diff.length()
-						if dist <= aoe_radius and dist > 0.001:
-							var aoe_dir: Vector3 = (diff.normalized() + shot_direction * 0.4 + Vector3(0.0, 0.25, 0.0)).normalized()
-							var aoe_factor: float = clampf(1.0 - (dist / aoe_radius), 0.3, 1.0)
-							if other_enemy.has_method("apply_kinetic_impulse"):
-								other_enemy.call("apply_kinetic_impulse", aoe_dir * (aoe_force * aoe_factor), GameManager.combo_count)
-							elif other_enemy is RigidBody3D:
-								(other_enemy as RigidBody3D).apply_central_impulse(aoe_dir * (aoe_force * aoe_factor))
+					if not is_instance_valid(enemy_node) or enemy_node == hit_node or not (enemy_node is Node3D):
+						continue
+					var other_enemy: Node3D = enemy_node as Node3D
+					var diff: Vector3 = other_enemy.global_position - cached_hit_pos
+					var dist: float = diff.length()
+					if dist <= aoe_radius and dist > 0.001:
+						var aoe_dir: Vector3 = (diff.normalized() + shot_direction * 0.4 + Vector3(0.0, 0.25, 0.0)).normalized()
+						var aoe_factor: float = clampf(1.0 - (dist / aoe_radius), 0.3, 1.0)
+						if other_enemy.has_method("apply_kinetic_impulse"):
+							other_enemy.call("apply_kinetic_impulse", aoe_dir * (aoe_force * aoe_factor), GameManager.combo_count)
+						elif other_enemy is RigidBody3D:
+							(other_enemy as RigidBody3D).apply_central_impulse(aoe_dir * (aoe_force * aoe_factor))
 
 	# Garantizar que no se aplique ningún retroceso vertical en el eje Y
 	if is_on_floor():
@@ -343,8 +349,9 @@ func _fire_kinetic_pulse() -> void:
 	elif velocity.y > 0.0:
 		velocity.y = 0.0
 
-	pulse_fired.emit(shot_origin, shot_direction, hit_node)
-	EventBus.pulse_fired.emit(shot_origin, shot_direction, hit_node)
+	var emitted_hit_node: Node3D = hit_node if is_instance_valid(hit_node) else null
+	pulse_fired.emit(shot_origin, shot_direction, emitted_hit_node)
+	EventBus.pulse_fired.emit(shot_origin, shot_direction, emitted_hit_node)
 
 func get_pull_target_position() -> Vector3:
 	var cam_forward: Vector3 = -camera.global_transform.basis.z.normalized()
@@ -363,6 +370,7 @@ func _fire_pull() -> void:
 
 	# Punto situado 2.5m frente a la cámara del jugador (+ Vector3.UP * 1.0)
 	var suspend_target: Vector3 = get_pull_target_position()
+	var origin_pos: Vector3 = enemy.global_position
 
 	if enemy.has_method("apply_pull"):
 		enemy.call("apply_pull", suspend_target, self)
@@ -380,23 +388,23 @@ func _fire_pull() -> void:
 	var singularity_stacks: int = GameManager.get_upgrade_stacks("gravity_singularity")
 	if singularity_stacks > 0:
 		var singularity_radius: float = 4.5 * (1.0 + float(singularity_stacks - 1) * 0.20)
-		var origin_pos: Vector3 = enemy.global_position
 		for enemy_node: Node in get_tree().get_nodes_in_group("enemies"):
-			if enemy_node != enemy and enemy_node is Node3D and is_instance_valid(enemy_node):
-				var sec_enemy: Node3D = enemy_node as Node3D
-				var diff_from_target: Vector3 = sec_enemy.global_position - origin_pos
-				if diff_from_target.length() <= singularity_radius:
-					if sec_enemy.has_method("apply_pull"):
-						sec_enemy.call("apply_pull", suspend_target, self)
-					elif sec_enemy is RigidBody3D:
-						var sec_rb: RigidBody3D = sec_enemy as RigidBody3D
-						sec_rb.linear_velocity = Vector3.ZERO
-						sec_rb.angular_velocity = Vector3.ZERO
-						sec_rb.gravity_scale = 0.05
-						var sec_pull_dir: Vector3 = suspend_target - sec_rb.global_position
-						sec_rb.apply_central_impulse(sec_pull_dir.normalized() * 12.0)
-						var sec_timer: SceneTreeTimer = get_tree().create_timer(0.6, true, false, true)
-						sec_timer.timeout.connect(_restore_enemy_gravity.bind(sec_rb))
+			if not is_instance_valid(enemy_node) or enemy_node == enemy or not (enemy_node is Node3D):
+				continue
+			var sec_enemy: Node3D = enemy_node as Node3D
+			var diff_from_target: Vector3 = sec_enemy.global_position - origin_pos
+			if diff_from_target.length() <= singularity_radius:
+				if sec_enemy.has_method("apply_pull"):
+					sec_enemy.call("apply_pull", suspend_target, self)
+				elif sec_enemy is RigidBody3D:
+					var sec_rb: RigidBody3D = sec_enemy as RigidBody3D
+					sec_rb.linear_velocity = Vector3.ZERO
+					sec_rb.angular_velocity = Vector3.ZERO
+					sec_rb.gravity_scale = 0.05
+					var sec_pull_dir: Vector3 = suspend_target - sec_rb.global_position
+					sec_rb.apply_central_impulse(sec_pull_dir.normalized() * 12.0)
+					var sec_timer: SceneTreeTimer = get_tree().create_timer(0.6, true, false, true)
+					sec_timer.timeout.connect(_restore_enemy_gravity.bind(sec_rb))
 
 func _restore_enemy_gravity(target_rb: RigidBody3D) -> void:
 	if is_instance_valid(target_rb):

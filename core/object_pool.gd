@@ -67,8 +67,8 @@ func _activate_shard_node(shard: Node3D, spawn_pos: Vector3) -> void:
 
 	if shard is Area3D:
 		var area: Area3D = shard as Area3D
-		area.monitoring = true
-		area.monitorable = true
+		area.set_deferred("monitoring", true)
+		area.set_deferred("monitorable", true)
 
 	if shard.has_method("reset_shard"):
 		shard.call("reset_shard")
@@ -81,5 +81,5 @@ func _deactivate_shard_node(shard: Node3D) -> void:
 
 	if shard is Area3D:
 		var area: Area3D = shard as Area3D
-		area.monitoring = false
-		area.monitorable = false
+		area.set_deferred("monitoring", false)
+		area.set_deferred("monitorable", false)

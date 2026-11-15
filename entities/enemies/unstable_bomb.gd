@@ -211,7 +211,9 @@ func explode() -> void:
 			var blast_dir: Vector3 = (diff.normalized() + Vector3(0.0, 0.35, 0.0)).normalized()
 			var blast_impulse: Vector3 = blast_dir * (blast_force * factor)
 
-			if target_node.has_method("apply_kinetic_impulse"):
+			if target_node.has_method("take_damage") and target_node.is_in_group("brutes"):
+				target_node.call("take_damage", 55.0, bomb_pos)
+			elif target_node.has_method("apply_kinetic_impulse"):
 				target_node.call("apply_kinetic_impulse", blast_impulse, GameManager.combo_count)
 			elif target_node is RigidBody3D:
 				var rb: RigidBody3D = target_node as RigidBody3D
