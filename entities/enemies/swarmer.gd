@@ -28,6 +28,7 @@ var is_being_pulled: bool = false
 var pull_target_pos: Vector3 = Vector3.ZERO
 var pull_timer: float = 0.0
 var pull_player_ref: Node3D = null
+var is_dead: bool = false
 
 @onready var visual_mesh: MeshInstance3D = $MeshInstance3D
 
@@ -42,6 +43,9 @@ func _ready() -> void:
 	body_entered.connect(_on_body_entered)
 	freeze = false
 
+	if visual_mesh and visual_mesh.material_override:
+		visual_mesh.material_override = visual_mesh.material_override.duplicate()
+
 	# Asegurar desfreeze tras 0.4s
 	var tree: SceneTree = get_tree()
 	if tree:
@@ -50,13 +54,20 @@ func _ready() -> void:
 				freeze = false
 		)
 
+func die_and_drop_xp() -> void:
+	if is_dead:
+		return
+	is_dead = true
+	if is_in_group("enemies"):
+		remove_from_group("enemies")
+	EventBus.enemy_eliminated.emit(self, GameManager.combo_count)
+	GameManager.spawn_xp_shard_at_edge(global_position)
+	queue_free()
+
 func _physics_process(delta: float) -> void:
 	var h_dist: float = Vector2(global_position.x, global_position.z).length()
 	if global_position.y < -5.0 or h_dist > 22.0:
-		if is_in_group("enemies"):
-			remove_from_group("enemies")
-			EventBus.enemy_eliminated.emit(self, GameManager.combo_count)
-		queue_free()
+		die_and_drop_xp()
 		return
 
 	if push_cooldown_timer > 0.0:
@@ -70,6 +81,10 @@ func _physics_process(delta: float) -> void:
 		projectile_timer -= delta
 		if projectile_timer <= 0.0:
 			linear_damp = NORMAL_LINEAR_DAMP
+			if visual_mesh and visual_mesh.material_override:
+				var mat: StandardMaterial3D = visual_mesh.material_override as StandardMaterial3D
+				if mat:
+					mat.emission_energy_multiplier = 0.5
 		else:
 			_apply_in_flight_magnetic_guidance(delta)
 

@@ -20,6 +20,8 @@ var combo_timer: float = 0.0
 var current_wave: int = 1
 var is_game_over: bool = false
 
+@export var xp_shard_scene: PackedScene = preload("res://entities/interactables/xp_shard.tscn")
+
 # Control centralizado de Hit-Stop
 var _hit_stop_end_msec: int = 0
 var _is_hit_stopping: bool = false
@@ -86,6 +88,28 @@ func add_score(base_points: int) -> void:
 func add_xp(amount: int) -> void:
 	xp += amount
 	xp_changed.emit(xp)
+
+## Instancia una esquirla de XP de forma diferida en el borde seguro de la plataforma
+func spawn_xp_shard_at_edge(death_pos: Vector3) -> void:
+	if not xp_shard_scene:
+		return
+	var spawn_pos: Vector3 = Vector3(
+		clampf(death_pos.x, -13.5, 13.5),
+		1.35,
+		clampf(death_pos.z, -13.5, 13.5)
+	)
+	call_deferred("_deferred_spawn_shard", spawn_pos)
+
+func _deferred_spawn_shard(spawn_pos: Vector3) -> void:
+	if not xp_shard_scene or not is_inside_tree():
+		return
+	var shard_instance: Node = xp_shard_scene.instantiate()
+	var shard_node: Node3D = shard_instance as Node3D
+	if shard_node:
+		shard_node.position = spawn_pos
+		var root: Node = get_tree().current_scene
+		if root:
+			root.add_child(shard_node)
 
 func notify_wave_completed(wave_num: int) -> void:
 	wave_completed.emit(wave_num)

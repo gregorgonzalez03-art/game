@@ -11,11 +11,11 @@ height = 2.2
 radius = 0.9
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_brute"]
-albedo_color = Color(0.3, 0.08, 0.45, 1)
-metallic = 0.3
-roughness = 0.4
+albedo_color = Color(0.38, 0.08, 0.52, 1)
+metallic = 0.7
+roughness = 0.35
 emission_enabled = true
-emission = Color(0.4, 0.05, 0.5, 1)
+emission = Color(0.85, 0.15, 0.95, 1)
 emission_energy_multiplier = 0.8
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_brute"]
@@ -39,4 +39,5 @@ script = ExtResource("1_brute")
 shape = SubResource("CylinderShape3D_brute")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+material_override = SubResource("StandardMaterial3D_brute")
 mesh = SubResource("CylinderMesh_brute")

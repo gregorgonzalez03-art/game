@@ -161,8 +161,11 @@ func _push_enemies() -> void:
 					rb.apply_central_impulse(push_dir * push_impulse)
 
 func _check_edge_overcharge() -> void:
+	var was_overcharged: bool = is_edge_overcharged
 	var max_dist_to_center: float = maxf(absf(global_position.x), absf(global_position.z))
 	is_edge_overcharged = max_dist_to_center > 11.0 and is_on_floor()
+	if is_edge_overcharged != was_overcharged:
+		EventBus.edge_overcharge_changed.emit(is_edge_overcharged)
 
 func _handle_timers(delta: float) -> void:
 	if dash_cooldown_timer > 0.0:
@@ -319,6 +322,7 @@ func _fire_kinetic_pulse() -> void:
 		velocity.y = 0.0
 
 	pulse_fired.emit(shot_origin, shot_direction, hit_node)
+	EventBus.pulse_fired.emit(shot_origin, shot_direction, hit_node)
 
 func get_pull_target_position() -> Vector3:
 	var cam_forward: Vector3 = -camera.global_transform.basis.z.normalized()
@@ -331,6 +335,7 @@ func _fire_pull() -> void:
 
 	pull_cooldown_timer = pull_cooldown
 	add_screen_shake(0.22)
+	EventBus.pull_fired.emit(enemy)
 
 	# Punto situado 2.5m frente a la cámara del jugador (+ Vector3.UP * 1.0)
 	var suspend_target: Vector3 = get_pull_target_position()

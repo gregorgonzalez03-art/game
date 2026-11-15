@@ -14,6 +14,7 @@ var chain_hits: int = 0
 var direct_hits: int = 0
 var is_resistant: bool = true
 var is_launched: bool = false
+var is_dead: bool = false
 var player_ref: Node3D = null
 
 @onready var visual_mesh: MeshInstance3D = $MeshInstance3D
@@ -40,14 +41,21 @@ func _ready() -> void:
 	if visual_mesh and visual_mesh.material_override:
 		visual_mesh.material_override = visual_mesh.material_override.duplicate()
 
+func die_and_drop_xp() -> void:
+	if is_dead:
+		return
+	is_dead = true
+	if is_in_group("enemies"):
+		remove_from_group("enemies")
+	EventBus.enemy_eliminated.emit(self, GameManager.combo_count)
+	GameManager.spawn_xp_shard_at_edge(global_position)
+	queue_free()
+
 func _physics_process(_delta: float) -> void:
 	# Respaldo absoluto para eliminación si cae o sale de los límites de la arena
 	var h_dist: float = Vector2(global_position.x, global_position.z).length()
 	if global_position.y < -5.0 or h_dist > 22.0:
-		if is_in_group("enemies"):
-			remove_from_group("enemies")
-			EventBus.enemy_eliminated.emit(self, GameManager.combo_count)
-		queue_free()
+		die_and_drop_xp()
 		return
 
 	if not is_launched:

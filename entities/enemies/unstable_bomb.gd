@@ -20,6 +20,7 @@ var is_being_pulled: bool = false
 var pull_target_pos: Vector3 = Vector3.ZERO
 var pull_timer: float = 0.0
 var pull_player_ref: Node3D = null
+var is_dead: bool = false
 
 @onready var visual_mesh: MeshInstance3D = $MeshInstance3D
 
@@ -45,14 +46,30 @@ func _ready() -> void:
 	if visual_mesh and visual_mesh.material_override:
 		visual_mesh.material_override = visual_mesh.material_override.duplicate()
 
+func die_and_drop_xp() -> void:
+	if is_dead:
+		return
+	is_dead = true
+	if is_in_group("enemies"):
+		remove_from_group("enemies")
+	EventBus.enemy_eliminated.emit(self, GameManager.combo_count)
+	GameManager.spawn_xp_shard_at_edge(global_position)
+	queue_free()
+
 func _physics_process(delta: float) -> void:
 	var h_dist: float = Vector2(global_position.x, global_position.z).length()
 	if global_position.y < -5.0 or h_dist > 22.0:
-		if is_in_group("enemies"):
-			remove_from_group("enemies")
-			EventBus.enemy_eliminated.emit(self, GameManager.combo_count)
-		queue_free()
+		die_and_drop_xp()
 		return
+
+	# Pulso visual constante neón naranja/dorado
+	pulse_time += delta * (14.0 if is_launched else 4.0)
+	if visual_mesh and visual_mesh.material_override:
+		var mat: StandardMaterial3D = visual_mesh.material_override as StandardMaterial3D
+		if mat:
+			var base_energy: float = 2.4 if is_launched else 1.2
+			var amp: float = 1.4 if is_launched else 0.5
+			mat.emission_energy_multiplier = base_energy + sin(pulse_time) * amp
 
 	if is_being_pulled:
 		_process_pull(delta)
@@ -60,13 +77,6 @@ func _physics_process(delta: float) -> void:
 
 	if is_launched and not is_exploding:
 		fuse_timer -= delta
-		pulse_time += delta * 12.0
-
-		if visual_mesh and visual_mesh.material_override:
-			var mat: StandardMaterial3D = visual_mesh.material_override as StandardMaterial3D
-			if mat:
-				mat.emission_energy_multiplier = 2.0 + sin(pulse_time) * 1.5
-
 		if fuse_timer <= 0.0:
 			explode()
 
