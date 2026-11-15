@@ -1,6 +1,7 @@
 extends Node
 
-## Singleton para gestionar estado del juego, combo, puntuación, XP, hit-stop y reinicio rápido.
+## Singleton para gestionar estado del juego, combo, puntuación, XP, progresión y mejoras.
+## Cumple estrictamente con AGENTS.md (tipado estricto, Godot 4.x).
 
 signal score_changed(new_score: int)
 signal combo_updated(count: int, multiplier: float)
@@ -11,6 +12,9 @@ signal wave_changed(current_wave: int)
 @warning_ignore("unused_signal")
 signal wave_completed(completed_wave: int)
 signal game_over_triggered(final_score: int, final_wave: int)
+signal level_up_triggered(new_level: int, draft_options: Array[Dictionary])
+signal upgrade_applied(upgrade_id: String, current_stacks: int)
+signal level_progress_updated(current_level: int, current_xp: int, needed_xp: int)
 
 var score: int = 0
 var xp: int = 0
@@ -19,6 +23,13 @@ var combo_multiplier: float = 1.0
 var combo_timer: float = 0.0
 var current_wave: int = 1
 var is_game_over: bool = false
+
+# Sistema de Progresión y Subida de Nivel
+var current_level: int = 1
+var xp_to_next_level: int = 80
+var active_upgrades: Dictionary = {}
+var pending_level_ups: int = 0
+var is_drafting: bool = false
 
 @export var xp_shard_scene: PackedScene = preload("res://entities/interactables/xp_shard.tscn")
 
@@ -34,6 +45,10 @@ func _ready() -> void:
 	EventBus.enemy_eliminated.connect(_on_enemy_eliminated)
 	EventBus.chain_collision.connect(_on_chain_collision)
 	EventBus.player_fell_off.connect(_on_player_fell_off)
+	call_deferred("_emit_initial_progress")
+
+func _emit_initial_progress() -> void:
+	level_progress_updated.emit(current_level, xp, xp_to_next_level)
 
 func _process(delta: float) -> void:
 	if _is_hit_stopping and Time.get_ticks_msec() >= _hit_stop_end_msec:
@@ -49,7 +64,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var key_event: InputEventKey = event as InputEventKey
 		if key_event.pressed and not key_event.echo and key_event.keycode == KEY_R:
-			restart_game()
+			if is_game_over:
+				restart_game()
 
 ## Centraliza el hit-stop visceral asegurando restauración a 1.0 incluso en llamadas sucesivas
 func trigger_hit_stop(duration: float = 0.05) -> void:
@@ -88,6 +104,48 @@ func add_score(base_points: int) -> void:
 func add_xp(amount: int) -> void:
 	xp += amount
 	xp_changed.emit(xp)
+	_check_level_up()
+
+func _check_level_up() -> void:
+	var leveled_up: bool = false
+	while xp >= xp_to_next_level:
+		xp -= xp_to_next_level
+		current_level += 1
+		xp_to_next_level = int(float(xp_to_next_level) * 1.4)
+		pending_level_ups += 1
+		leveled_up = true
+
+	level_progress_updated.emit(current_level, xp, xp_to_next_level)
+
+	if leveled_up and not is_drafting and not is_game_over:
+		trigger_upgrade_draft()
+
+func trigger_upgrade_draft() -> void:
+	if is_game_over:
+		return
+	is_drafting = true
+	get_tree().paused = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	var draft: Array[Dictionary] = UpgradesCatalog.get_random_draft(3)
+	level_up_triggered.emit(current_level, draft)
+
+func apply_upgrade(upgrade_id: String) -> void:
+	var current_stacks: int = get_upgrade_stacks(upgrade_id)
+	active_upgrades[upgrade_id] = current_stacks + 1
+	upgrade_applied.emit(upgrade_id, active_upgrades[upgrade_id])
+
+	if pending_level_ups > 0:
+		pending_level_ups -= 1
+
+	if pending_level_ups > 0 and not is_game_over:
+		call_deferred("trigger_upgrade_draft")
+	else:
+		is_drafting = false
+		get_tree().paused = false
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+func get_upgrade_stacks(upgrade_id: String) -> int:
+	return int(active_upgrades.get(upgrade_id, 0))
 
 ## Instancia una esquirla de XP de forma diferida en el borde seguro de la plataforma
 func spawn_xp_shard_at_edge(death_pos: Vector3) -> void:
@@ -133,12 +191,14 @@ func game_over() -> void:
 	if is_game_over:
 		return
 	is_game_over = true
+	is_drafting = false
 	get_tree().paused = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	game_over_triggered.emit(score, current_wave)
 
 func restart_game() -> void:
 	is_game_over = false
+	is_drafting = false
 	get_tree().paused = false
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	Engine.time_scale = 1.0
@@ -146,11 +206,16 @@ func restart_game() -> void:
 	_hit_stop_end_msec = 0
 	score = 0
 	xp = 0
+	current_level = 1
+	xp_to_next_level = 80
+	pending_level_ups = 0
+	active_upgrades.clear()
 	current_wave = 1
 	reset_combo()
 	xp_changed.emit(xp)
 	score_changed.emit(score)
 	wave_changed.emit(current_wave)
+	level_progress_updated.emit(current_level, xp, xp_to_next_level)
 	var tree: SceneTree = get_tree()
 	if tree:
 		tree.call_deferred("reload_current_scene")

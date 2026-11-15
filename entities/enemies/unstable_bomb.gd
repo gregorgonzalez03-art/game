@@ -134,7 +134,10 @@ func explode() -> void:
 	var bomb_pos: Vector3 = global_position
 	var space_state: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
 	var shape: SphereShape3D = SphereShape3D.new()
-	shape.radius = blast_radius
+
+	var shrapnel_stacks: int = GameManager.get_upgrade_stacks("volatile_shrapnel")
+	var effective_blast_radius: float = blast_radius * (1.0 + float(shrapnel_stacks) * 0.30)
+	shape.radius = effective_blast_radius
 
 	var query: PhysicsShapeQueryParameters3D = PhysicsShapeQueryParameters3D.new()
 	query.shape = shape
@@ -152,7 +155,7 @@ func explode() -> void:
 				diff = Vector3(0.0, 1.0, 0.0)
 				dist = 1.0
 
-			var factor: float = clampf(1.0 - (dist / blast_radius), 0.2, 1.0)
+			var factor: float = clampf(1.0 - (dist / effective_blast_radius), 0.2, 1.0)
 			var blast_dir: Vector3 = (diff.normalized() + Vector3(0.0, 0.35, 0.0)).normalized()
 			var blast_impulse: Vector3 = blast_dir * (blast_force * factor)
 

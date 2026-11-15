@@ -111,7 +111,10 @@ func _check_player_magnet(delta: float) -> void:
 	var diff: Vector3 = player_ref.global_position + Vector3(0.0, 0.9, 0.0) - global_position
 	var dist: float = diff.length()
 
-	if dist <= magnet_radius or is_collecting:
+	var overdrive_stacks: int = GameManager.get_upgrade_stacks("kinetic_overdrive")
+	var effective_radius: float = magnet_radius + float(overdrive_stacks) * 2.5
+
+	if dist <= effective_radius or is_collecting:
 		is_collecting = true
 		var move_step: Vector3 = diff.normalized() * (magnet_speed * delta)
 		global_position += move_step

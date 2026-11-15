@@ -29,6 +29,7 @@ var pull_target_pos: Vector3 = Vector3.ZERO
 var pull_timer: float = 0.0
 var pull_player_ref: Node3D = null
 var is_dead: bool = false
+var has_hit_other_enemy: bool = false
 
 @onready var visual_mesh: MeshInstance3D = $MeshInstance3D
 
@@ -60,9 +61,33 @@ func die_and_drop_xp() -> void:
 	is_dead = true
 	if is_in_group("enemies"):
 		remove_from_group("enemies")
+
+	# Sinergia volatile_shrapnel: micro-onda expansiva si eliminó/chocó con un enemigo
+	var shrapnel_stacks: int = GameManager.get_upgrade_stacks("volatile_shrapnel")
+	if has_hit_other_enemy and shrapnel_stacks > 0:
+		_trigger_micro_shockwave()
+
 	EventBus.enemy_eliminated.emit(self, GameManager.combo_count)
 	GameManager.spawn_xp_shard_at_edge(global_position)
 	queue_free()
+
+func _trigger_micro_shockwave() -> void:
+	var death_pos: Vector3 = global_position
+	var shrapnel_stacks: int = GameManager.get_upgrade_stacks("volatile_shrapnel")
+	var shockwave_radius: float = 4.5 * (1.0 + float(shrapnel_stacks - 1) * 0.25)
+	var shockwave_force: float = 18.0 * (1.0 + float(shrapnel_stacks - 1) * 0.25)
+	for enemy_node: Node in get_tree().get_nodes_in_group("enemies"):
+		if enemy_node != self and enemy_node is Node3D and is_instance_valid(enemy_node):
+			var other: Node3D = enemy_node as Node3D
+			var diff: Vector3 = other.global_position - death_pos
+			var dist: float = diff.length()
+			if dist <= shockwave_radius and dist > 0.001:
+				var blast_dir: Vector3 = (diff.normalized() + Vector3(0.0, 0.35, 0.0)).normalized()
+				var factor: float = clampf(1.0 - (dist / shockwave_radius), 0.25, 1.0)
+				if other.has_method("apply_kinetic_impulse"):
+					other.call("apply_kinetic_impulse", blast_dir * shockwave_force * factor, GameManager.combo_count)
+				elif other is RigidBody3D:
+					(other as RigidBody3D).apply_central_impulse(blast_dir * shockwave_force * factor)
 
 func _physics_process(delta: float) -> void:
 	var h_dist: float = Vector2(global_position.x, global_position.z).length()
@@ -267,13 +292,21 @@ func _on_body_entered(body: Node) -> void:
 	if body is Node3D and body.is_in_group("enemies") and body != self:
 		var other_enemy: Node3D = body as Node3D
 		if other_enemy.has_method("apply_kinetic_impulse"):
+			has_hit_other_enemy = true
 			var transfer_dir: Vector3 = (other_enemy.global_position - global_position).normalized()
 			if transfer_dir == Vector3.ZERO:
 				transfer_dir = -global_transform.basis.z
 
-			var transfer_impulse: Vector3 = (transfer_dir + Vector3(0.0, 0.2, 0.0)).normalized() * (speed * chain_multiplier)
+			var ricochet_stacks: int = GameManager.get_upgrade_stacks("elastic_ricochet")
+			var ricochet_mult: float = 1.0 + float(ricochet_stacks) * 0.35
+			var effective_chain_mult: float = chain_multiplier * ricochet_mult
+			var transfer_impulse: Vector3 = (transfer_dir + Vector3(0.0, 0.2, 0.0)).normalized() * (speed * effective_chain_mult)
 
 			GameManager.trigger_hit_stop(0.05)
 			GameManager.add_combo()
 			EventBus.chain_collision.emit(GameManager.combo_count, global_position)
 			other_enemy.call("apply_kinetic_impulse", transfer_impulse, GameManager.combo_count)
+
+			if ricochet_stacks > 0:
+				var rebound_dir: Vector3 = (-transfer_dir + Vector3(0.0, 0.25, 0.0)).normalized()
+				apply_central_impulse(rebound_dir * (speed * 0.45 * ricochet_mult))
