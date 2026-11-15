@@ -1,0 +1,37 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://entities/enemies/swarmer.gd" id="1_swarmer"]
+
+[sub_resource type="PhysicsMaterial" id="PhysicsMaterial_swarmer"]
+bounce = 0.4
+absorbent = true
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_swarmer"]
+radius = 0.5
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_swarmer"]
+albedo_color = Color(0.95, 0.15, 0.15, 1)
+roughness = 0.3
+emission_enabled = true
+emission = Color(0.85, 0.08, 0.08, 1)
+emission_energy_multiplier = 0.8
+
+[sub_resource type="SphereMesh" id="SphereMesh_swarmer"]
+material = SubResource("StandardMaterial3D_swarmer")
+radius = 0.5
+height = 1.0
+
+[node name="Swarmer" type="RigidBody3D" groups=["enemies"]]
+mass = 1.5
+physics_material_override = SubResource("PhysicsMaterial_swarmer")
+contact_monitor = true
+max_contacts_reported = 6
+linear_damp = 1.2
+angular_damp = 2.0
+script = ExtResource("1_swarmer")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("SphereShape3D_swarmer")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+mesh = SubResource("SphereMesh_swarmer")
