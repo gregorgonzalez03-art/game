@@ -6,6 +6,8 @@ extends RigidBody3D
 ##   - 3 disparos directos del jugador rompen su resistencia y lo lanzan por los aires.
 ##   - Respaldo a prueba de fallos: cae o sale de los límites y se elimina con queue_free().
 
+const ENEMY_SHADER: Shader = preload("res://entities/effects/enemy_hit_fresnel.gdshader")
+
 @export var mass_weight: float = 25.0
 @export var pursue_speed: float = 2.2
 @export var pursue_force: float = 50.0
@@ -16,6 +18,10 @@ var is_resistant: bool = true
 var is_launched: bool = false
 var is_dead: bool = false
 var player_ref: Node3D = null
+
+var shader_mat: ShaderMaterial = null
+var hit_flash_tween: Tween = null
+var dissolve_tween: Tween = null
 
 @onready var visual_mesh: MeshInstance3D = $MeshInstance3D
 
@@ -30,6 +36,8 @@ func _ready() -> void:
 	body_entered.connect(_on_body_entered)
 	freeze = false
 
+	_setup_shader()
+
 	# Asegurar desfreeze tras 0.4s
 	var tree: SceneTree = get_tree()
 	if tree:
@@ -38,8 +46,49 @@ func _ready() -> void:
 				freeze = false
 		)
 
-	if visual_mesh and visual_mesh.material_override:
-		visual_mesh.material_override = visual_mesh.material_override.duplicate()
+func _setup_shader() -> void:
+	if not visual_mesh:
+		return
+	shader_mat = ShaderMaterial.new()
+	shader_mat.shader = ENEMY_SHADER
+	shader_mat.set_shader_parameter("albedo_color", Color(0.38, 0.08, 0.52, 1.0))
+	shader_mat.set_shader_parameter("emission_color", Color(0.85, 0.15, 0.95, 1.0))
+	shader_mat.set_shader_parameter("emission_energy", 0.8)
+	shader_mat.set_shader_parameter("metallic", 0.7)
+	shader_mat.set_shader_parameter("roughness", 0.35)
+	shader_mat.set_shader_parameter("dissolve_edge_color", Color("#FF00D4"))
+	visual_mesh.material_override = shader_mat
+
+func play_hit_flash() -> void:
+	if not shader_mat:
+		return
+	if hit_flash_tween and hit_flash_tween.is_valid():
+		hit_flash_tween.kill()
+	hit_flash_tween = create_tween()
+	shader_mat.set_shader_parameter("hit_flash", 1.0)
+	hit_flash_tween.tween_method(
+		func(val: float) -> void:
+			if shader_mat:
+				shader_mat.set_shader_parameter("hit_flash", val),
+		1.0, 0.0, 0.12
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+func play_dissolve(duration: float = 0.32, on_complete: Callable = Callable()) -> void:
+	if not shader_mat:
+		if on_complete.is_valid():
+			on_complete.call()
+		return
+	if dissolve_tween and dissolve_tween.is_valid():
+		dissolve_tween.kill()
+	dissolve_tween = create_tween()
+	dissolve_tween.tween_method(
+		func(val: float) -> void:
+			if shader_mat:
+				shader_mat.set_shader_parameter("dissolve_amount", val),
+		0.0, 1.0, duration
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	if on_complete.is_valid():
+		dissolve_tween.finished.connect(on_complete)
 
 func die_and_drop_xp() -> void:
 	if is_dead:
@@ -49,7 +98,12 @@ func die_and_drop_xp() -> void:
 		remove_from_group("enemies")
 	EventBus.enemy_eliminated.emit(self, GameManager.combo_count)
 	GameManager.spawn_xp_shard_at_edge(global_position)
-	queue_free()
+	if global_position.y >= -3.0:
+		freeze = true
+		$CollisionShape3D.set_deferred("disabled", true)
+		play_dissolve(0.3, queue_free)
+	else:
+		queue_free()
 
 func _physics_process(_delta: float) -> void:
 	# Respaldo absoluto para eliminación si cae o sale de los límites de la arena
@@ -152,15 +206,12 @@ func _register_chain_impact(impulse: Vector3, _combo_level: int) -> void:
 		apply_central_impulse(impulse * 0.5)
 
 func _flash_armor(was_chain: bool) -> void:
-	if visual_mesh and visual_mesh.material_override:
-		var mat: StandardMaterial3D = visual_mesh.material_override as StandardMaterial3D
-		if mat:
-			if was_chain:
-				mat.albedo_color = Color(0.8, 0.2, 0.9, 1.0)
-				mat.emission = Color(0.9, 0.2, 1.0, 1.0)
-				mat.emission_energy_multiplier = 3.0
-			else:
-				mat.emission_energy_multiplier = 1.5
+	play_hit_flash()
+	if shader_mat:
+		if was_chain:
+			shader_mat.set_shader_parameter("emission_energy", 3.0)
+		else:
+			shader_mat.set_shader_parameter("emission_energy", 1.8)
 
 func _on_body_entered(body: Node) -> void:
 	if body is Node3D and body.is_in_group("enemies") and body != self:

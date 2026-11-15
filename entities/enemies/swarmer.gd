@@ -18,6 +18,8 @@ const MAGNETIC_SEARCH_RADIUS: float = 25.0
 const PUSH_FORCE: float = 5.0
 const PUSH_COOLDOWN: float = 0.35
 
+const ENEMY_SHADER: Shader = preload("res://entities/effects/enemy_hit_fresnel.gdshader")
+
 var is_launched: bool = false
 var projectile_timer: float = 0.0
 var player_ref: Node3D = null
@@ -30,6 +32,10 @@ var pull_timer: float = 0.0
 var pull_player_ref: Node3D = null
 var is_dead: bool = false
 var has_hit_other_enemy: bool = false
+
+var shader_mat: ShaderMaterial = null
+var hit_flash_tween: Tween = null
+var dissolve_tween: Tween = null
 
 @onready var visual_mesh: MeshInstance3D = $MeshInstance3D
 
@@ -44,8 +50,7 @@ func _ready() -> void:
 	body_entered.connect(_on_body_entered)
 	freeze = false
 
-	if visual_mesh and visual_mesh.material_override:
-		visual_mesh.material_override = visual_mesh.material_override.duplicate()
+	_setup_shader()
 
 	# Asegurar desfreeze tras 0.4s
 	var tree: SceneTree = get_tree()
@@ -54,6 +59,48 @@ func _ready() -> void:
 			if is_instance_valid(self):
 				freeze = false
 		)
+
+func _setup_shader() -> void:
+	if not visual_mesh:
+		return
+	shader_mat = ShaderMaterial.new()
+	shader_mat.shader = ENEMY_SHADER
+	shader_mat.set_shader_parameter("albedo_color", Color(0.95, 0.08, 0.12, 1.0))
+	shader_mat.set_shader_parameter("emission_color", Color(0.95, 0.08, 0.12, 1.0))
+	shader_mat.set_shader_parameter("emission_energy", 0.5)
+	shader_mat.set_shader_parameter("dissolve_edge_color", Color("#00E5FF"))
+	visual_mesh.material_override = shader_mat
+
+func play_hit_flash() -> void:
+	if not shader_mat:
+		return
+	if hit_flash_tween and hit_flash_tween.is_valid():
+		hit_flash_tween.kill()
+	hit_flash_tween = create_tween()
+	shader_mat.set_shader_parameter("hit_flash", 1.0)
+	hit_flash_tween.tween_method(
+		func(val: float) -> void:
+			if shader_mat:
+				shader_mat.set_shader_parameter("hit_flash", val),
+		1.0, 0.0, 0.12
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+func play_dissolve(duration: float = 0.28, on_complete: Callable = Callable()) -> void:
+	if not shader_mat:
+		if on_complete.is_valid():
+			on_complete.call()
+		return
+	if dissolve_tween and dissolve_tween.is_valid():
+		dissolve_tween.kill()
+	dissolve_tween = create_tween()
+	dissolve_tween.tween_method(
+		func(val: float) -> void:
+			if shader_mat:
+				shader_mat.set_shader_parameter("dissolve_amount", val),
+		0.0, 1.0, duration
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	if on_complete.is_valid():
+		dissolve_tween.finished.connect(on_complete)
 
 func die_and_drop_xp() -> void:
 	if is_dead:
@@ -68,6 +115,14 @@ func die_and_drop_xp() -> void:
 		_trigger_micro_shockwave()
 
 	EventBus.enemy_eliminated.emit(self, GameManager.combo_count)
+	GameManager.spawn_xp_shard_at_edge(global_position)
+
+	if global_position.y >= -3.0:
+		freeze = true
+		$CollisionShape3D.set_deferred("disabled", true)
+		play_dissolve(0.25, queue_free)
+	else:
+		queue_free()
 	GameManager.spawn_xp_shard_at_edge(global_position)
 	queue_free()
 
@@ -106,10 +161,8 @@ func _physics_process(delta: float) -> void:
 		projectile_timer -= delta
 		if projectile_timer <= 0.0:
 			linear_damp = NORMAL_LINEAR_DAMP
-			if visual_mesh and visual_mesh.material_override:
-				var mat: StandardMaterial3D = visual_mesh.material_override as StandardMaterial3D
-				if mat:
-					mat.emission_energy_multiplier = 0.5
+			if shader_mat:
+				shader_mat.set_shader_parameter("emission_energy", 0.5)
 		else:
 			_apply_in_flight_magnetic_guidance(delta)
 
@@ -122,6 +175,7 @@ func _physics_process(delta: float) -> void:
 		_pursue_player()
 
 func apply_pull(target_pos: Vector3, player_node: Node3D = null) -> void:
+	play_hit_flash()
 	is_being_pulled = true
 	pull_target_pos = target_pos
 	pull_player_ref = player_node
@@ -172,6 +226,7 @@ func _pursue_player() -> void:
 
 ## Impacto cinético recibido: activa el Modo Proyectil con asistencia magnética
 func apply_kinetic_impulse(impulse: Vector3, combo_level: int, _is_chain: bool = false) -> void:
+	play_hit_flash()
 	is_being_pulled = false
 	gravity_scale = 1.0
 	is_launched = true
@@ -182,10 +237,8 @@ func apply_kinetic_impulse(impulse: Vector3, combo_level: int, _is_chain: bool =
 	apply_central_impulse(assisted_impulse)
 	EventBus.enemy_launched.emit(self, assisted_impulse.length())
 
-	if visual_mesh and visual_mesh.material_override:
-		var mat: StandardMaterial3D = visual_mesh.material_override as StandardMaterial3D
-		if mat:
-			mat.emission_energy_multiplier = 2.5 + float(combo_level) * 0.5
+	if shader_mat:
+		shader_mat.set_shader_parameter("emission_energy", 2.5 + float(combo_level) * 0.5)
 
 func _calculate_magnetic_assistance(raw_impulse: Vector3) -> Vector3:
 	var impulse_speed: float = raw_impulse.length()
@@ -304,6 +357,9 @@ func _on_body_entered(body: Node) -> void:
 
 			GameManager.trigger_hit_stop(0.05)
 			GameManager.add_combo()
+			play_hit_flash()
+			if other_enemy.has_method("play_hit_flash"):
+				other_enemy.call("play_hit_flash")
 			EventBus.chain_collision.emit(GameManager.combo_count, global_position)
 			other_enemy.call("apply_kinetic_impulse", transfer_impulse, GameManager.combo_count)
 

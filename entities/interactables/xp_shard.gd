@@ -125,7 +125,28 @@ func _on_body_entered(body: Node3D) -> void:
 	if body.is_in_group("player"):
 		_collect()
 
+func reset_shard() -> void:
+	current_xp = base_xp
+	life_timer = 0.0
+	is_degraded = false
+	is_collecting = false
+	player_ref = null
+	rotation_speed = 5.5
+
+	if mesh_instance:
+		mesh_instance.scale = Vector3.ONE
+		mesh_instance.position.y = 0.0
+		var mat: StandardMaterial3D = mesh_instance.material_override as StandardMaterial3D
+		if mat:
+			mat.albedo_color = SHARD_COLOR
+			mat.emission = SHARD_COLOR
+			mat.emission_energy_multiplier = 2.8
+
+	if omni_light:
+		omni_light.light_color = SHARD_COLOR
+		omni_light.light_energy = 1.4
+
 func _collect() -> void:
 	EventBus.xp_collected.emit(current_xp)
 	GameManager.add_xp(current_xp)
-	queue_free()
+	ObjectPool.deactivate_shard(self)

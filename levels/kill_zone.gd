@@ -40,10 +40,4 @@ func _calculate_nearest_edge(from_pos: Vector3) -> Vector3:
 	return Vector3(x, 1.35, z)
 
 func _spawn_xp_shard(spawn_pos: Vector3) -> void:
-	if not xp_shard_scene:
-		return
-	var shard_instance: Node = xp_shard_scene.instantiate()
-	var shard_node: Node3D = shard_instance as Node3D
-	if shard_node:
-		shard_node.position = spawn_pos
-		get_parent().add_child(shard_node)
+	ObjectPool.activate_shard(spawn_pos)

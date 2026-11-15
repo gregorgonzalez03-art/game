@@ -4,6 +4,7 @@ extends CanvasLayer
 ## Cumple estrictamente con AGENTS.md (tipado estricto, Godot 4.x).
 
 @onready var score_label: Label = $UI/MarginContainer/VBoxContainer/ScoreLabel
+@onready var record_label: Label = $UI/MarginContainer/VBoxContainer/RecordLabel
 @onready var xp_label: Label = $UI/MarginContainer/VBoxContainer/XPLabel
 @onready var xp_progress_bar: ProgressBar = $UI/MarginContainer/VBoxContainer/XPProgressBar
 @onready var wave_label: Label = $UI/MarginContainer/VBoxContainer/WaveLabel
@@ -13,6 +14,8 @@ extends CanvasLayer
 
 @onready var game_over_panel: ColorRect = $UI/GameOverPanel
 @onready var game_over_stats: Label = $UI/GameOverPanel/CenterContainer/VBoxContainer/StatsLabel
+@onready var new_record_label: Label = $UI/GameOverPanel/CenterContainer/VBoxContainer/NewRecordLabel
+@onready var best_stats_label: Label = $UI/GameOverPanel/CenterContainer/VBoxContainer/BestStatsLabel
 @onready var restart_button: Button = $UI/GameOverPanel/CenterContainer/VBoxContainer/RestartButton
 
 # Interfaz de Draft de Sinergias
@@ -50,6 +53,7 @@ func _ready() -> void:
 	GameManager.game_over_triggered.connect(_on_game_over_triggered)
 	GameManager.level_up_triggered.connect(_on_level_up_triggered)
 	GameManager.level_progress_updated.connect(_on_level_progress_updated)
+	SaveManager.save_data_updated.connect(_on_save_data_updated)
 
 	if restart_button:
 		restart_button.pressed.connect(_on_restart_button_pressed)
@@ -64,6 +68,7 @@ func _ready() -> void:
 	_on_score_changed(GameManager.score)
 	_on_level_progress_updated(GameManager.current_level, GameManager.xp, GameManager.xp_to_next_level)
 	_on_combo_updated(GameManager.combo_count, GameManager.combo_multiplier)
+	_on_save_data_updated(SaveManager.high_score, SaveManager.best_wave, SaveManager.total_enemies_launched)
 
 	if wave_label:
 		wave_label.text = "OLEADA ACTUAL: %d" % GameManager.current_wave
@@ -236,6 +241,10 @@ func _play_banner_pop(scale_peak: Vector2, duration: float) -> void:
 	_banner_tween.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_banner_tween.tween_property(wave_banner_label, "scale", Vector2.ONE, duration)
 
+func _on_save_data_updated(high_score: int, best_wave: int, _total_launched: int) -> void:
+	if record_label:
+		record_label.text = "BEST: %d | WAVE REC: %d" % [high_score, best_wave]
+
 func _on_game_over_triggered(final_score: int, final_wave: int) -> void:
 	if wave_banner_label:
 		wave_banner_label.visible = false
@@ -245,6 +254,15 @@ func _on_game_over_triggered(final_score: int, final_wave: int) -> void:
 		game_over_panel.visible = true
 	if game_over_stats:
 		game_over_stats.text = "PUNTUACIÓN FINAL: %d | OLEADA ALCANZADA: %d" % [final_score, final_wave]
+	if best_stats_label:
+		best_stats_label.text = "RÉCORD PERSONAL - PUNTOS: %d | MEJOR OLEADA: %d" % [SaveManager.high_score, SaveManager.best_wave]
+	if new_record_label:
+		var is_new: bool = SaveManager.is_new_high_score or SaveManager.is_new_best_wave
+		new_record_label.visible = is_new
+		if is_new:
+			var tween: Tween = create_tween()
+			new_record_label.scale = Vector2(1.2, 1.2)
+			tween.tween_property(new_record_label, "scale", Vector2.ONE, 0.4).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 func _on_restart_button_pressed() -> void:
 	GameManager.restart_game()

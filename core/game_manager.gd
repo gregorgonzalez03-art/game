@@ -147,27 +147,19 @@ func apply_upgrade(upgrade_id: String) -> void:
 func get_upgrade_stacks(upgrade_id: String) -> int:
 	return int(active_upgrades.get(upgrade_id, 0))
 
-## Instancia una esquirla de XP de forma diferida en el borde seguro de la plataforma
+## Activa una esquirla de XP desde el ObjectPool en el borde seguro de la plataforma
 func spawn_xp_shard_at_edge(death_pos: Vector3) -> void:
-	if not xp_shard_scene:
-		return
 	var spawn_pos: Vector3 = Vector3(
 		clampf(death_pos.x, -13.5, 13.5),
 		1.35,
 		clampf(death_pos.z, -13.5, 13.5)
 	)
-	call_deferred("_deferred_spawn_shard", spawn_pos)
+	call_deferred("_deferred_activate_shard", spawn_pos)
 
-func _deferred_spawn_shard(spawn_pos: Vector3) -> void:
-	if not xp_shard_scene or not is_inside_tree():
+func _deferred_activate_shard(spawn_pos: Vector3) -> void:
+	if not is_inside_tree():
 		return
-	var shard_instance: Node = xp_shard_scene.instantiate()
-	var shard_node: Node3D = shard_instance as Node3D
-	if shard_node:
-		shard_node.position = spawn_pos
-		var root: Node = get_tree().current_scene
-		if root:
-			root.add_child(shard_node)
+	ObjectPool.activate_shard(spawn_pos)
 
 func notify_wave_completed(wave_num: int) -> void:
 	wave_completed.emit(wave_num)
@@ -212,6 +204,8 @@ func restart_game() -> void:
 	active_upgrades.clear()
 	current_wave = 1
 	reset_combo()
+	ObjectPool.deactivate_all()
+	SaveManager.reset_session_flags()
 	xp_changed.emit(xp)
 	score_changed.emit(score)
 	wave_changed.emit(current_wave)

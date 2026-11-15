@@ -25,6 +25,8 @@ _mcp_game_helper="*res://addons/godot_ai/runtime/game_helper.gd"
 EventBus="*res://core/event_bus.gd"
 GameManager="*res://core/game_manager.gd"
 AudioFeedback="*res://core/audio_feedback.gd"
+SaveManager="*res://core/save_manager.gd"
+ObjectPool="*res://core/object_pool.gd"
 
 [display]
 

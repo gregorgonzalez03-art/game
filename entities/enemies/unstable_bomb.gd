@@ -4,6 +4,8 @@ extends RigidBody3D
 ## Masa 3.0 kg. Al ser lanzado o chocar a alta velocidad, detona una
 ## onda expansiva radial que lanza a todos los cuerpos cercanos.
 
+const ENEMY_SHADER: Shader = preload("res://entities/effects/enemy_hit_fresnel.gdshader")
+
 @export var mass_weight: float = 3.0
 @export var blast_radius: float = 7.0
 @export var blast_force: float = 38.0
@@ -22,6 +24,10 @@ var pull_timer: float = 0.0
 var pull_player_ref: Node3D = null
 var is_dead: bool = false
 
+var shader_mat: ShaderMaterial = null
+var hit_flash_tween: Tween = null
+var dissolve_tween: Tween = null
+
 @onready var visual_mesh: MeshInstance3D = $MeshInstance3D
 
 func _ready() -> void:
@@ -35,6 +41,8 @@ func _ready() -> void:
 	body_entered.connect(_on_body_entered)
 	freeze = false
 
+	_setup_shader()
+
 	# Asegurar desfreeze tras 0.4s
 	var tree: SceneTree = get_tree()
 	if tree:
@@ -43,8 +51,47 @@ func _ready() -> void:
 				freeze = false
 		)
 
-	if visual_mesh and visual_mesh.material_override:
-		visual_mesh.material_override = visual_mesh.material_override.duplicate()
+func _setup_shader() -> void:
+	if not visual_mesh:
+		return
+	shader_mat = ShaderMaterial.new()
+	shader_mat.shader = ENEMY_SHADER
+	shader_mat.set_shader_parameter("albedo_color", Color(1.0, 0.45, 0.05, 1.0))
+	shader_mat.set_shader_parameter("emission_color", Color(1.0, 0.4, 0.0, 1.0))
+	shader_mat.set_shader_parameter("emission_energy", 1.6)
+	shader_mat.set_shader_parameter("dissolve_edge_color", Color("#FFAA00"))
+	visual_mesh.material_override = shader_mat
+
+func play_hit_flash() -> void:
+	if not shader_mat:
+		return
+	if hit_flash_tween and hit_flash_tween.is_valid():
+		hit_flash_tween.kill()
+	hit_flash_tween = create_tween()
+	shader_mat.set_shader_parameter("hit_flash", 1.0)
+	hit_flash_tween.tween_method(
+		func(val: float) -> void:
+			if shader_mat:
+				shader_mat.set_shader_parameter("hit_flash", val),
+		1.0, 0.0, 0.12
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+func play_dissolve(duration: float = 0.25, on_complete: Callable = Callable()) -> void:
+	if not shader_mat:
+		if on_complete.is_valid():
+			on_complete.call()
+		return
+	if dissolve_tween and dissolve_tween.is_valid():
+		dissolve_tween.kill()
+	dissolve_tween = create_tween()
+	dissolve_tween.tween_method(
+		func(val: float) -> void:
+			if shader_mat:
+				shader_mat.set_shader_parameter("dissolve_amount", val),
+		0.0, 1.0, duration
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	if on_complete.is_valid():
+		dissolve_tween.finished.connect(on_complete)
 
 func die_and_drop_xp() -> void:
 	if is_dead:
@@ -54,7 +101,12 @@ func die_and_drop_xp() -> void:
 		remove_from_group("enemies")
 	EventBus.enemy_eliminated.emit(self, GameManager.combo_count)
 	GameManager.spawn_xp_shard_at_edge(global_position)
-	queue_free()
+	if global_position.y >= -3.0:
+		freeze = true
+		$CollisionShape3D.set_deferred("disabled", true)
+		play_dissolve(0.25, queue_free)
+	else:
+		queue_free()
 
 func _physics_process(delta: float) -> void:
 	var h_dist: float = Vector2(global_position.x, global_position.z).length()
@@ -64,12 +116,10 @@ func _physics_process(delta: float) -> void:
 
 	# Pulso visual constante neón naranja/dorado
 	pulse_time += delta * (14.0 if is_launched else 4.0)
-	if visual_mesh and visual_mesh.material_override:
-		var mat: StandardMaterial3D = visual_mesh.material_override as StandardMaterial3D
-		if mat:
-			var base_energy: float = 2.4 if is_launched else 1.2
-			var amp: float = 1.4 if is_launched else 0.5
-			mat.emission_energy_multiplier = base_energy + sin(pulse_time) * amp
+	if shader_mat:
+		var base_energy: float = 2.4 if is_launched else 1.2
+		var amp: float = 1.4 if is_launched else 0.5
+		shader_mat.set_shader_parameter("emission_energy", base_energy + sin(pulse_time) * amp)
 
 	if is_being_pulled:
 		_process_pull(delta)
@@ -81,6 +131,7 @@ func _physics_process(delta: float) -> void:
 			explode()
 
 func apply_kinetic_impulse(impulse: Vector3, _combo_level: int, _is_chain: bool = false) -> void:
+	play_hit_flash()
 	is_being_pulled = false
 	gravity_scale = 1.0
 	is_launched = true
@@ -90,6 +141,7 @@ func apply_kinetic_impulse(impulse: Vector3, _combo_level: int, _is_chain: bool 
 	EventBus.enemy_launched.emit(self, impulse.length())
 
 func apply_pull(target_pos: Vector3, player_node: Node3D = null) -> void:
+	play_hit_flash()
 	is_being_pulled = true
 	pull_target_pos = target_pos
 	pull_player_ref = player_node
@@ -173,4 +225,8 @@ func explode() -> void:
 
 	GameManager.add_combo()
 	EventBus.chain_collision.emit(GameManager.combo_count, bomb_pos)
-	queue_free()
+	EventBus.enemy_eliminated.emit(self, GameManager.combo_count)
+	GameManager.spawn_xp_shard_at_edge(bomb_pos)
+	freeze = true
+	$CollisionShape3D.set_deferred("disabled", true)
+	play_dissolve(0.24, queue_free)

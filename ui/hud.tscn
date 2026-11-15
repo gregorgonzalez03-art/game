@@ -57,6 +57,13 @@ theme_override_font_sizes/font_size = 20
 text = "SCORE: 0"
 horizontal_alignment = 2
 
+[node name="RecordLabel" type="Label" parent="UI/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.85, 1, 0.9)
+theme_override_font_sizes/font_size = 14
+text = "BEST: 0 | WAVE REC: 1"
+horizontal_alignment = 2
+
 [node name="XPLabel" type="Label" parent="UI/MarginContainer/VBoxContainer"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.2, 1, 0.5, 1)
@@ -421,6 +428,24 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.85, 0.88, 0.95, 1)
 theme_override_font_sizes/font_size = 20
 text = "PUNTUACIÓN FINAL: 0 | OLEADA ALCANZADA: 1"
+horizontal_alignment = 1
+
+[node name="NewRecordLabel" type="Label" parent="UI/GameOverPanel/CenterContainer/VBoxContainer"]
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.85, 0.1, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.8)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_font_sizes/font_size = 26
+text = "¡NUEVO RÉCORD!"
+horizontal_alignment = 1
+
+[node name="BestStatsLabel" type="Label" parent="UI/GameOverPanel/CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 18
+text = "RÉCORD PERSONAL - PUNTOS: 0 | MEJOR OLEADA: 1"
 horizontal_alignment = 1
 
 [node name="RestartButton" type="Button" parent="UI/GameOverPanel/CenterContainer/VBoxContainer"]
