@@ -1,0 +1,16 @@
+.godot/
+builds/
+export/
+*.exe
+*.pck
+*.apk
+*.aab
+*.ipa
+*.dmg
+*.zip
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
+*~
+*.log
